@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+import "shortest_paths.proto";
+
+option go_package = "github.com/nmalensek/shortest-path/messaging";
+
+package messaging;
+
+service OverlayRegistration {
+    //Provides node information (host, port) to register the node as part of the overlay. The host and port are the address information for the node's own gRPC service to pass messages between overlay nodes.
+    rpc RegisterNode(Node) returns (RegistrationResponse) {}
+
+    //Provides node information to leave the overlay after registering but before any connections have been established.
+    rpc DeregisterNode(Node) returns (DeregistrationResponse) {}
+
+    //Sends a stream of Nodees that the calling node should connect to.
+    rpc GetConnections(Node) returns (stream Node) {}
+
+    //Sends a stream of Edges that represent the entire overlay so each node can calculate its shortest paths from its established connections.
+    rpc GetEdges(EdgesRequest) returns (stream Edge) {}
+
+    //Allows overlay nodes to transmit their metadata when it's ready (i.e., when done with a task, etc.)
+    rpc ProcessMetadata(MessagingMetadata) returns (MetadataConfirmation) {}
+}
+
+message RegistrationResponse {}
+message DeregistrationResponse {}
+
+message ConnectionRequest {}
+
+message EdgesRequest {}
+message Edge {
+    Node source = 1;
+    Node destination = 2;
+    int32 weight = 3;
+}
+
+message MetadataConfirmation {}

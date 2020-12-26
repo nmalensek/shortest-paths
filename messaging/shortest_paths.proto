@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+option go_package = "github.com/nmalensek/shortest-path/messaging";
+
+package messaging;
+
+service PathMessenger {
+    //Starts the PathMessenger nodes' tasks.
+    rpc StartTask(TaskRequest) returns (TaskConfirmation) {}
+
+    //Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
+    rpc ProcessMessage(PathMessage) returns (PathResponse) {}
+    
+    //Transmits metadata about the messages the node has sent and received over the course of the task.
+    rpc GetMessagingData(MessagingDataRequest) returns (MessagingMetadata) {}
+}
+
+message Node {
+    //the node's hostname:port as a string.
+    string id = 1;
+}
+
+message PathMessage {
+    //a random signed int32.
+    int32 payload = 1;
+
+    //sink node address.
+    Node destination = 2;
+
+    //for debugging purposes; each node along the path should add itself so it's possible to see how the payload traveled.
+    repeated Node path = 16;
+}
+message PathResponse{}
+
+message TaskRequest {
+    int64 batches_to_send = 1;
+    int64 messages_per_batch = 2;
+}
+message TaskConfirmation{}
+
+//Used to check for correctness at the end of a run; the total messages sent and received by each node should match the amount in the configuration and the total payload values sent in the overlay should match the total values received.
+message MessagingMetadata {
+    int64 messages_sent = 1;
+    int64 messages_received = 2;
+    int64 messages_relayed = 3;
+    int64 payload_sent = 4;
+    int64 payload_received = 5;
+}
+message MessagingDataRequest{}
