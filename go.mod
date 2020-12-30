@@ -1,4 +1,4 @@
-module github.com/nmalensek/shortest-path
+module github.com/nmalensek/shortest-paths
 
 go 1.15
 
