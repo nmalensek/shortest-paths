@@ -16,7 +16,10 @@ import (
 )
 
 var (
-	port = flag.Int("port", 10000, "The server port")
+	port        = flag.Int("port", 10000, "The server port")
+	rounds      = flag.Int("rounds", 1000, "The number of 5-message batches every other node in the overlay needs to send")
+	connections = flag.Int("connections", 4, "The number of nodes every other node must be connected to")
+	peers       = flag.Int("peers", 10, "The total number of nodes that need to be present in the overlay before starting the task")
 )
 
 type registrationServer struct {
