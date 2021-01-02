@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nmalensek/shortest-paths/addressing"
 
@@ -67,6 +68,17 @@ func startPeerService(c chan string) {
 	}()
 }
 
+func registerToOverlay(c messaging.OverlayRegistrationClient, serveAddr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := c.RegisterNode(ctx, &messaging.Node{Id: serveAddr})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -85,7 +97,8 @@ func main() {
 		log.Fatal(myIP)
 	}
 
-	//client := messaging.NewOverlayRegistrationClient(conn)
-	//client.RegisterNode()
+	regClient := messaging.NewOverlayRegistrationClient(conn)
+	registerToOverlay(regClient, myIP)
 
+	time.Sleep(20 * time.Second)
 }

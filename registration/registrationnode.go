@@ -24,17 +24,12 @@ var (
 
 type registrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
-	mu              sync.Mutex //prevent registration overwrites
+	mu              sync.Mutex
 	registeredNodes map[string]*messaging.Node
 }
 
 //RegisterNode stores the address of the sender in a map of known nodes.
 func (s *registrationServer) RegisterNode(ctx context.Context, n *messaging.Node) (*messaging.RegistrationResponse, error) {
-	err := addressBelongsToSender(ctx, n.GetId())
-	if err != nil {
-		return nil, err
-	}
-
 	_, present := s.registeredNodes[n.GetId()]
 	if present {
 		return nil, errors.New("address already registered")
@@ -51,10 +46,6 @@ func (s *registrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 
 //DeregisterNode removes the node address from the map of known nodes.
 func (s *registrationServer) DeregisterNode(ctx context.Context, n *messaging.Node) (*messaging.DeregistrationResponse, error) {
-	err := addressBelongsToSender(ctx, n.GetId())
-	if err != nil {
-		return nil, err
-	}
 	return &messaging.DeregistrationResponse{}, nil
 }
 
@@ -70,10 +61,11 @@ func (s *registrationServer) ProcessMetadata(ctx context.Context, mmd *messaging
 	return nil, nil
 }
 
+//Retrieves the sender's IP address and compares it with the given ID. Intended to ensure a node could only register/deregister itself; however, it's more accurate to do this on the basis of auth tokens or something similar because a node's sending and receiving addresses will be different.
 func addressBelongsToSender(ctx context.Context, id string) error {
 	p, ok := peer.FromContext(ctx)
 	if !ok || p.Addr.String() != id {
-		err := errors.New("could not register node (address mismatch)")
+		err := errors.New("could not deregister node (address mismatch)")
 		log.Println(err)
 		return err
 	}
@@ -93,6 +85,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
+	fmt.Printf("Listening on %v:%d\n", localIP, *port)
 
 	grpcServer := grpc.NewServer()
 
