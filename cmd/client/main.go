@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,11 @@ import (
 var (
 	registrationIP   = flag.String("regIp", "127.0.0.1", "The IP address of the registration node")
 	registrationPort = flag.Int("regPort", 10000, "The port the registration node is using")
+	taskComplete     = false
+	numWorkers       = 5
+	workChannel      = make(chan messaging.PathMessage, numWorkers)
+
+	helpText = `this is the help text that will list the available commands eventually`
 )
 
 type messengerServer struct {
@@ -38,14 +45,34 @@ func (s *messengerServer) StartTask(context.Context, *messaging.TaskRequest) (*m
 	return nil, nil
 }
 
-//Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
+func (s *messengerServer) PushConnections(messaging.PathMessenger_PushConnectionsServer) error {
+	return nil
+}
+
+func (s *messengerServer) PushPaths(messaging.PathMessenger_PushPathsServer) error {
+	return nil
+}
+
+// Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
 func (s *messengerServer) ProcessMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
 	return nil, nil
 }
 
-//Transmits metadata about the messages the node has sent and received over the course of the task.
+// Transmits metadata about the messages the node has sent and received over the course of the task.
+// Technically shouldn't have to worry about locking here because metadata sends should happen at the end
+// of the run if everything goes well, but this might help if it's called early (debugging or something's wrong).
 func (s *messengerServer) GetMessagingData(context.Context, *messaging.MessagingDataRequest) (*messaging.MessagingMetadata, error) {
-	return nil, nil
+	s.mu.Lock()
+	data := &messaging.MessagingMetadata{
+		MessagesSent:     s.messagesSent,
+		MessagesReceived: s.messagesReceived,
+		MessagesRelayed:  s.messagesRelayed,
+		PayloadSent:      s.payloadSent,
+		PayloadReceived:  s.payloadReceived,
+	}
+	s.mu.Unlock()
+
+	return data, nil
 }
 
 func newPeerServer() *messengerServer {
@@ -57,7 +84,6 @@ func startPeerService(c chan string) {
 	go func() {
 		listen, err := net.Listen("tcp", fmt.Sprintf("%v:0", addr.String()))
 		if err != nil {
-			//TODO: make this a separate channel?
 			c <- "error: failed to start the peer service"
 		}
 		c <- listen.Addr().String()
@@ -84,9 +110,9 @@ func main() {
 
 	opts := []grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}
 
-	conn, err := grpc.Dial(fmt.Sprintf("%v:%d", *registrationIP, *registrationPort), opts...)
+	conn, err := grpc.Dial(fmt.Sprintf("%v:%v", *registrationIP, *registrationPort), opts...)
 	if err != nil {
-		log.Fatalf("failed to connect to server %v:%d", *registrationIP, *registrationPort)
+		log.Fatalf("failed to connect to server %v:%v", *registrationIP, *registrationPort)
 	}
 	defer conn.Close()
 
@@ -98,7 +124,19 @@ func main() {
 	}
 
 	regClient := messaging.NewOverlayRegistrationClient(conn)
-	registerToOverlay(regClient, myIP)
+	err = registerToOverlay(regClient, myIP)
+	if err != nil {
+		log.Fatalf("registration failed with error %v", err)
+	}
 
-	time.Sleep(20 * time.Second)
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		command := scanner.Text()
+		switch command {
+		case "exit":
+
+		default:
+			fmt.Printf("command %v not recognized, available options are:\n%v\n", command, helpText)
+		}
+	}
 }

@@ -13,12 +13,20 @@ service PathMessenger {
     
     //Transmits metadata about the messages the node has sent and received over the course of the task.
     rpc GetMessagingData(MessagingDataRequest) returns (MessagingMetadata) {}
+
+    //Sends a stream of Nodes that the calling node should connect to.
+    rpc PushConnections(stream Node) returns (ConnectionResponse) {}
+
+    rpc PushPaths(stream Edge) returns (ConnectionResponse) {}
 }
 
 message Node {
     //the node's hostname:port as a string.
     string id = 1;
 }
+
+message ConnectionResponse{}
+message ConnectionRequest {}
 
 message PathMessage {
     //a random signed int32.
@@ -37,6 +45,13 @@ message TaskRequest {
     int64 messages_per_batch = 2;
 }
 message TaskConfirmation{}
+
+message EdgeRequest {}
+message Edge {
+    Node source = 1;
+    Node destination = 2;
+    int32 weight = 3;
+}
 
 //Used to check for correctness at the end of a run; the total messages sent and received by each node should match the amount in the configuration and the total payload values sent in the overlay should match the total values received.
 message MessagingMetadata {

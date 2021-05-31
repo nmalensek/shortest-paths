@@ -21,10 +21,8 @@ type OverlayRegistrationClient interface {
 	RegisterNode(ctx context.Context, in *Node, opts ...grpc.CallOption) (*RegistrationResponse, error)
 	//Provides node information to leave the overlay after registering but before any connections have been established.
 	DeregisterNode(ctx context.Context, in *Node, opts ...grpc.CallOption) (*DeregistrationResponse, error)
-	//Sends a stream of Nodees that the calling node should connect to.
-	GetConnections(ctx context.Context, in *Node, opts ...grpc.CallOption) (OverlayRegistration_GetConnectionsClient, error)
-	//Sends a stream of Edges that represent the entire overlay so each node can calculate its shortest paths from its established connections.
-	GetEdges(ctx context.Context, in *EdgesRequest, opts ...grpc.CallOption) (OverlayRegistration_GetEdgesClient, error)
+	//Sends a stream of Edges that represent the entire overlay for debugging.
+	GetOverlay(ctx context.Context, in *EdgeRequest, opts ...grpc.CallOption) (OverlayRegistration_GetOverlayClient, error)
 	//Allows overlay nodes to transmit their metadata when it's ready (i.e., when done with a task, etc.)
 	ProcessMetadata(ctx context.Context, in *MessagingMetadata, opts ...grpc.CallOption) (*MetadataConfirmation, error)
 }
@@ -55,12 +53,12 @@ func (c *overlayRegistrationClient) DeregisterNode(ctx context.Context, in *Node
 	return out, nil
 }
 
-func (c *overlayRegistrationClient) GetConnections(ctx context.Context, in *Node, opts ...grpc.CallOption) (OverlayRegistration_GetConnectionsClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_OverlayRegistration_serviceDesc.Streams[0], "/messaging.OverlayRegistration/GetConnections", opts...)
+func (c *overlayRegistrationClient) GetOverlay(ctx context.Context, in *EdgeRequest, opts ...grpc.CallOption) (OverlayRegistration_GetOverlayClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_OverlayRegistration_serviceDesc.Streams[0], "/messaging.OverlayRegistration/GetOverlay", opts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &overlayRegistrationGetConnectionsClient{stream}
+	x := &overlayRegistrationGetOverlayClient{stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -70,48 +68,16 @@ func (c *overlayRegistrationClient) GetConnections(ctx context.Context, in *Node
 	return x, nil
 }
 
-type OverlayRegistration_GetConnectionsClient interface {
-	Recv() (*Node, error)
-	grpc.ClientStream
-}
-
-type overlayRegistrationGetConnectionsClient struct {
-	grpc.ClientStream
-}
-
-func (x *overlayRegistrationGetConnectionsClient) Recv() (*Node, error) {
-	m := new(Node)
-	if err := x.ClientStream.RecvMsg(m); err != nil {
-		return nil, err
-	}
-	return m, nil
-}
-
-func (c *overlayRegistrationClient) GetEdges(ctx context.Context, in *EdgesRequest, opts ...grpc.CallOption) (OverlayRegistration_GetEdgesClient, error) {
-	stream, err := c.cc.NewStream(ctx, &_OverlayRegistration_serviceDesc.Streams[1], "/messaging.OverlayRegistration/GetEdges", opts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &overlayRegistrationGetEdgesClient{stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-type OverlayRegistration_GetEdgesClient interface {
+type OverlayRegistration_GetOverlayClient interface {
 	Recv() (*Edge, error)
 	grpc.ClientStream
 }
 
-type overlayRegistrationGetEdgesClient struct {
+type overlayRegistrationGetOverlayClient struct {
 	grpc.ClientStream
 }
 
-func (x *overlayRegistrationGetEdgesClient) Recv() (*Edge, error) {
+func (x *overlayRegistrationGetOverlayClient) Recv() (*Edge, error) {
 	m := new(Edge)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
@@ -136,10 +102,8 @@ type OverlayRegistrationServer interface {
 	RegisterNode(context.Context, *Node) (*RegistrationResponse, error)
 	//Provides node information to leave the overlay after registering but before any connections have been established.
 	DeregisterNode(context.Context, *Node) (*DeregistrationResponse, error)
-	//Sends a stream of Nodees that the calling node should connect to.
-	GetConnections(*Node, OverlayRegistration_GetConnectionsServer) error
-	//Sends a stream of Edges that represent the entire overlay so each node can calculate its shortest paths from its established connections.
-	GetEdges(*EdgesRequest, OverlayRegistration_GetEdgesServer) error
+	//Sends a stream of Edges that represent the entire overlay for debugging.
+	GetOverlay(*EdgeRequest, OverlayRegistration_GetOverlayServer) error
 	//Allows overlay nodes to transmit their metadata when it's ready (i.e., when done with a task, etc.)
 	ProcessMetadata(context.Context, *MessagingMetadata) (*MetadataConfirmation, error)
 	mustEmbedUnimplementedOverlayRegistrationServer()
@@ -155,11 +119,8 @@ func (UnimplementedOverlayRegistrationServer) RegisterNode(context.Context, *Nod
 func (UnimplementedOverlayRegistrationServer) DeregisterNode(context.Context, *Node) (*DeregistrationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeregisterNode not implemented")
 }
-func (UnimplementedOverlayRegistrationServer) GetConnections(*Node, OverlayRegistration_GetConnectionsServer) error {
-	return status.Errorf(codes.Unimplemented, "method GetConnections not implemented")
-}
-func (UnimplementedOverlayRegistrationServer) GetEdges(*EdgesRequest, OverlayRegistration_GetEdgesServer) error {
-	return status.Errorf(codes.Unimplemented, "method GetEdges not implemented")
+func (UnimplementedOverlayRegistrationServer) GetOverlay(*EdgeRequest, OverlayRegistration_GetOverlayServer) error {
+	return status.Errorf(codes.Unimplemented, "method GetOverlay not implemented")
 }
 func (UnimplementedOverlayRegistrationServer) ProcessMetadata(context.Context, *MessagingMetadata) (*MetadataConfirmation, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessMetadata not implemented")
@@ -213,45 +174,24 @@ func _OverlayRegistration_DeregisterNode_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
-func _OverlayRegistration_GetConnections_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(Node)
+func _OverlayRegistration_GetOverlay_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(EdgeRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(OverlayRegistrationServer).GetConnections(m, &overlayRegistrationGetConnectionsServer{stream})
+	return srv.(OverlayRegistrationServer).GetOverlay(m, &overlayRegistrationGetOverlayServer{stream})
 }
 
-type OverlayRegistration_GetConnectionsServer interface {
-	Send(*Node) error
-	grpc.ServerStream
-}
-
-type overlayRegistrationGetConnectionsServer struct {
-	grpc.ServerStream
-}
-
-func (x *overlayRegistrationGetConnectionsServer) Send(m *Node) error {
-	return x.ServerStream.SendMsg(m)
-}
-
-func _OverlayRegistration_GetEdges_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(EdgesRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(OverlayRegistrationServer).GetEdges(m, &overlayRegistrationGetEdgesServer{stream})
-}
-
-type OverlayRegistration_GetEdgesServer interface {
+type OverlayRegistration_GetOverlayServer interface {
 	Send(*Edge) error
 	grpc.ServerStream
 }
 
-type overlayRegistrationGetEdgesServer struct {
+type overlayRegistrationGetOverlayServer struct {
 	grpc.ServerStream
 }
 
-func (x *overlayRegistrationGetEdgesServer) Send(m *Edge) error {
+func (x *overlayRegistrationGetOverlayServer) Send(m *Edge) error {
 	return x.ServerStream.SendMsg(m)
 }
 
@@ -292,13 +232,8 @@ var _OverlayRegistration_serviceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "GetConnections",
-			Handler:       _OverlayRegistration_GetConnections_Handler,
-			ServerStreams: true,
-		},
-		{
-			StreamName:    "GetEdges",
-			Handler:       _OverlayRegistration_GetEdges_Handler,
+			StreamName:    "GetOverlay",
+			Handler:       _OverlayRegistration_GetOverlay_Handler,
 			ServerStreams: true,
 		},
 	},

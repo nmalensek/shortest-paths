@@ -23,6 +23,9 @@ type PathMessengerClient interface {
 	ProcessMessage(ctx context.Context, in *PathMessage, opts ...grpc.CallOption) (*PathResponse, error)
 	//Transmits metadata about the messages the node has sent and received over the course of the task.
 	GetMessagingData(ctx context.Context, in *MessagingDataRequest, opts ...grpc.CallOption) (*MessagingMetadata, error)
+	//Sends a stream of Nodes that the calling node should connect to.
+	PushConnections(ctx context.Context, opts ...grpc.CallOption) (PathMessenger_PushConnectionsClient, error)
+	PushPaths(ctx context.Context, opts ...grpc.CallOption) (PathMessenger_PushPathsClient, error)
 }
 
 type pathMessengerClient struct {
@@ -60,6 +63,74 @@ func (c *pathMessengerClient) GetMessagingData(ctx context.Context, in *Messagin
 	return out, nil
 }
 
+func (c *pathMessengerClient) PushConnections(ctx context.Context, opts ...grpc.CallOption) (PathMessenger_PushConnectionsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_PathMessenger_serviceDesc.Streams[0], "/messaging.PathMessenger/PushConnections", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pathMessengerPushConnectionsClient{stream}
+	return x, nil
+}
+
+type PathMessenger_PushConnectionsClient interface {
+	Send(*Node) error
+	CloseAndRecv() (*ConnectionResponse, error)
+	grpc.ClientStream
+}
+
+type pathMessengerPushConnectionsClient struct {
+	grpc.ClientStream
+}
+
+func (x *pathMessengerPushConnectionsClient) Send(m *Node) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *pathMessengerPushConnectionsClient) CloseAndRecv() (*ConnectionResponse, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new(ConnectionResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func (c *pathMessengerClient) PushPaths(ctx context.Context, opts ...grpc.CallOption) (PathMessenger_PushPathsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_PathMessenger_serviceDesc.Streams[1], "/messaging.PathMessenger/PushPaths", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &pathMessengerPushPathsClient{stream}
+	return x, nil
+}
+
+type PathMessenger_PushPathsClient interface {
+	Send(*Edge) error
+	CloseAndRecv() (*ConnectionResponse, error)
+	grpc.ClientStream
+}
+
+type pathMessengerPushPathsClient struct {
+	grpc.ClientStream
+}
+
+func (x *pathMessengerPushPathsClient) Send(m *Edge) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *pathMessengerPushPathsClient) CloseAndRecv() (*ConnectionResponse, error) {
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	m := new(ConnectionResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // PathMessengerServer is the server API for PathMessenger service.
 // All implementations must embed UnimplementedPathMessengerServer
 // for forward compatibility
@@ -70,6 +141,9 @@ type PathMessengerServer interface {
 	ProcessMessage(context.Context, *PathMessage) (*PathResponse, error)
 	//Transmits metadata about the messages the node has sent and received over the course of the task.
 	GetMessagingData(context.Context, *MessagingDataRequest) (*MessagingMetadata, error)
+	//Sends a stream of Nodes that the calling node should connect to.
+	PushConnections(PathMessenger_PushConnectionsServer) error
+	PushPaths(PathMessenger_PushPathsServer) error
 	mustEmbedUnimplementedPathMessengerServer()
 }
 
@@ -85,6 +159,12 @@ func (UnimplementedPathMessengerServer) ProcessMessage(context.Context, *PathMes
 }
 func (UnimplementedPathMessengerServer) GetMessagingData(context.Context, *MessagingDataRequest) (*MessagingMetadata, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetMessagingData not implemented")
+}
+func (UnimplementedPathMessengerServer) PushConnections(PathMessenger_PushConnectionsServer) error {
+	return status.Errorf(codes.Unimplemented, "method PushConnections not implemented")
+}
+func (UnimplementedPathMessengerServer) PushPaths(PathMessenger_PushPathsServer) error {
+	return status.Errorf(codes.Unimplemented, "method PushPaths not implemented")
 }
 func (UnimplementedPathMessengerServer) mustEmbedUnimplementedPathMessengerServer() {}
 
@@ -153,6 +233,58 @@ func _PathMessenger_GetMessagingData_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _PathMessenger_PushConnections_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PathMessengerServer).PushConnections(&pathMessengerPushConnectionsServer{stream})
+}
+
+type PathMessenger_PushConnectionsServer interface {
+	SendAndClose(*ConnectionResponse) error
+	Recv() (*Node, error)
+	grpc.ServerStream
+}
+
+type pathMessengerPushConnectionsServer struct {
+	grpc.ServerStream
+}
+
+func (x *pathMessengerPushConnectionsServer) SendAndClose(m *ConnectionResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *pathMessengerPushConnectionsServer) Recv() (*Node, error) {
+	m := new(Node)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+func _PathMessenger_PushPaths_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(PathMessengerServer).PushPaths(&pathMessengerPushPathsServer{stream})
+}
+
+type PathMessenger_PushPathsServer interface {
+	SendAndClose(*ConnectionResponse) error
+	Recv() (*Edge, error)
+	grpc.ServerStream
+}
+
+type pathMessengerPushPathsServer struct {
+	grpc.ServerStream
+}
+
+func (x *pathMessengerPushPathsServer) SendAndClose(m *ConnectionResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *pathMessengerPushPathsServer) Recv() (*Edge, error) {
+	m := new(Edge)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 var _PathMessenger_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "messaging.PathMessenger",
 	HandlerType: (*PathMessengerServer)(nil),
@@ -170,6 +302,17 @@ var _PathMessenger_serviceDesc = grpc.ServiceDesc{
 			Handler:    _PathMessenger_GetMessagingData_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "PushConnections",
+			Handler:       _PathMessenger_PushConnections_Handler,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "PushPaths",
+			Handler:       _PathMessenger_PushPaths_Handler,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "shortest_paths.proto",
 }
