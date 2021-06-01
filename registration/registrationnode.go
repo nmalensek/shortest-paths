@@ -24,6 +24,7 @@ type RegistrationServer struct {
 	nodeConnections []messaging.PathMessengerClient
 	opts            []grpc.DialOption
 	dial            func(string, ...grpc.DialOption) (*grpc.ClientConn, error)
+	metadata        map[string]*messaging.MessagingMetadata
 }
 
 func New(opts []grpc.DialOption) *RegistrationServer {
@@ -90,5 +91,37 @@ func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messagi
 }
 
 func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging.MessagingMetadata) (*messaging.MetadataConfirmation, error) {
-	return nil, nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.metadata[mmd.GetSender().Id] = mmd
+
+	if len(s.metadata) == len(s.registeredNodes) {
+		printMetadata(s.metadata)
+	}
+
+	return &messaging.MetadataConfirmation{}, nil
+}
+
+func printMetadata(d map[string]*messaging.MessagingMetadata) {
+	var totalMessagesSent int64 = 0
+	var totalMessagesReceived int64 = 0
+	var totalMessagesRelayed int64 = 0
+
+	var totalPayloadSent int64 = 0
+	var totalPayloadReceived int64 = 0
+
+	fmt.Println("Node\tMessages Sent\tMessages Received\tMessages Relayed\tPayload Sent\t Payload Received")
+	for k, v := range d {
+		totalMessagesSent += v.MessagesSent
+		totalMessagesReceived += v.MessagesSent
+		totalMessagesRelayed += v.MessagesRelayed
+
+		totalPayloadSent += v.PayloadSent
+		totalPayloadReceived += v.PayloadReceived
+
+		fmt.Println(fmt.Sprintf("%v\t%v\t%v\t%v\t%v\t%v", k, v.GetMessagesSent(), v.GetMessagesReceived(), v.GetMessagesRelayed(), v.GetPayloadSent(), v.GetPayloadReceived()))
+	}
+	fmt.Println("-------------------------------------------------------------------------")
+	fmt.Println(fmt.Sprintf("\t\t\t%v\t%v\t%v\t%v\t%v", totalMessagesSent, totalMessagesReceived, totalMessagesRelayed, totalPayloadSent, totalPayloadReceived))
 }

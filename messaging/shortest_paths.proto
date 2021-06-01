@@ -60,5 +60,6 @@ message MessagingMetadata {
     int64 messages_relayed = 3;
     int64 payload_sent = 4;
     int64 payload_received = 5;
+    Node sender = 6;
 }
 message MessagingDataRequest{}
