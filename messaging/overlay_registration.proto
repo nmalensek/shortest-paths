@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-import "shortest_paths.proto";
+import "messaging/shortest_paths.proto";
 
 option go_package = "github.com/nmalensek/shortest-path/messaging";
 

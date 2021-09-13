@@ -14,9 +14,7 @@ service PathMessenger {
     //Transmits metadata about the messages the node has sent and received over the course of the task.
     rpc GetMessagingData(MessagingDataRequest) returns (MessagingMetadata) {}
 
-    //Sends a stream of Nodes that the calling node should connect to.
-    rpc PushConnections(stream Node) returns (ConnectionResponse) {}
-
+    //Sends a stream of Edges that represent the overlay the node is part of.
     rpc PushPaths(stream Edge) returns (ConnectionResponse) {}
 }
 

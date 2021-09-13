@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
 	"google.golang.org/grpc"
 )
@@ -19,6 +20,7 @@ type dialer interface {
 type RegistrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
 	mu              sync.Mutex
+	settings        config.RegistrationServer
 	overlaySent     bool
 	registeredNodes map[string]*messaging.Node
 	nodeConnections []messaging.PathMessengerClient
@@ -27,11 +29,12 @@ type RegistrationServer struct {
 	metadata        map[string]*messaging.MessagingMetadata
 }
 
-func New(opts []grpc.DialOption) *RegistrationServer {
+func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationServer {
 	return &RegistrationServer{
 		registeredNodes: make(map[string]*messaging.Node),
 		dial:            grpc.Dial,
 		opts:            opts,
+		settings:        conf,
 	}
 }
 
@@ -73,15 +76,16 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 	defer s.mu.Unlock()
 
 	if s.overlaySent {
+		// TODO: allow deregistration; update the shortest paths and re-send.
 		return &messaging.DeregistrationResponse{}, errors.New("overlay has been sent, cannot deregister node")
 	}
 
-	n, ok := s.registeredNodes[n.GetId()]
+	_, ok := s.registeredNodes[n.GetId()]
 	if !ok {
 		return &messaging.DeregistrationResponse{}, fmt.Errorf("could not find node %v", n.GetId())
 	}
 
-	delete(s.registeredNodes, n.Id)
+	delete(s.registeredNodes, n.GetId())
 
 	return &messaging.DeregistrationResponse{}, nil
 }
@@ -101,6 +105,14 @@ func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging
 	}
 
 	return &messaging.MetadataConfirmation{}, nil
+}
+
+func (s *RegistrationServer) setRandomEdgeWeights() {
+
+}
+
+func (s *RegistrationServer) setRandomConnections() {
+
 }
 
 func printMetadata(d map[string]*messaging.MessagingMetadata) {

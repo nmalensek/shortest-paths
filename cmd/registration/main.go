@@ -7,6 +7,7 @@ import (
 	"net"
 
 	"github.com/nmalensek/shortest-paths/addressing"
+	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/registration"
 	"google.golang.org/grpc"
@@ -21,7 +22,7 @@ var (
 )
 
 func main() {
-	flag.Parse()
+	conf := setConfig()
 
 	localIP := addressing.GetIP().String()
 
@@ -33,6 +34,17 @@ func main() {
 
 	grpcServer := grpc.NewServer()
 
-	messaging.RegisterOverlayRegistrationServer(grpcServer, registration.New(grpcOpts))
+	messaging.RegisterOverlayRegistrationServer(grpcServer, registration.New(grpcOpts, conf))
 	grpcServer.Serve(listener)
+}
+
+func setConfig() config.RegistrationServer {
+	flag.Parse()
+
+	return config.RegistrationServer{
+		Port:        *port,
+		Rounds:      *rounds,
+		Connections: *connections,
+		Peers:       *peers,
+	}
 }

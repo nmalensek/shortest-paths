@@ -237,5 +237,5 @@ var _OverlayRegistration_serviceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "overlay_registration.proto",
+	Metadata: "messaging/overlay_registration.proto",
 }
