@@ -35,7 +35,10 @@ func main() {
 	grpcServer := grpc.NewServer()
 
 	messaging.RegisterOverlayRegistrationServer(grpcServer, registration.New(grpcOpts, conf))
-	grpcServer.Serve(listener)
+	err = grpcServer.Serve(listener)
+	if err != nil {
+		log.Fatalf("server error: %v", err)
+	}
 }
 
 func setConfig() config.RegistrationServer {

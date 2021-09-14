@@ -45,10 +45,6 @@ func (s *messengerServer) StartTask(context.Context, *messaging.TaskRequest) (*m
 	return nil, nil
 }
 
-func (s *messengerServer) PushConnections(messaging.PathMessenger_PushConnectionsServer) error {
-	return nil
-}
-
 func (s *messengerServer) PushPaths(messaging.PathMessenger_PushPathsServer) error {
 	return nil
 }
@@ -90,7 +86,10 @@ func startPeerService(c chan string) {
 
 		peerServe := grpc.NewServer()
 		messaging.RegisterPathMessengerServer(peerServe, newPeerServer())
-		peerServe.Serve(listen)
+		serveErr := peerServe.Serve(listen)
+		if serveErr != nil {
+			log.Fatalf("server error: %v", serveErr)
+		}
 	}()
 }
 
@@ -116,25 +115,29 @@ func main() {
 	}
 	defer conn.Close()
 
+	// startPeerService starts a GRPC server on a random open port in a goroutine, capture its address
+	// and use it to register to the overlay.
 	peerChan := make(chan string)
 	startPeerService(peerChan)
 	myIP := <-peerChan
 	if strings.HasPrefix(myIP, "error") {
 		log.Fatal(myIP)
 	}
+	fmt.Printf("Listening on %v\n", myIP)
 
 	regClient := messaging.NewOverlayRegistrationClient(conn)
 	err = registerToOverlay(regClient, myIP)
 	if err != nil {
 		log.Fatalf("registration failed with error %v", err)
 	}
+	fmt.Printf("Successfully registered to overlay\n")
 
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		command := scanner.Text()
 		switch command {
 		case "exit":
-
+			os.Exit(0)
 		default:
 			fmt.Printf("command %v not recognized, available options are:\n%v\n", command, helpText)
 		}
