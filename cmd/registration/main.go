@@ -21,9 +21,18 @@ var (
 	grpcOpts    = []grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}
 )
 
-func main() {
-	conf := setConfig()
+func setConfig() config.RegistrationServer {
+	flag.Parse()
 
+	return config.RegistrationServer{
+		Port:        *port,
+		Rounds:      *rounds,
+		Connections: *connections,
+		Peers:       *peers,
+	}
+}
+
+func main() {
 	localIP := addressing.GetIP().String()
 
 	listener, err := net.Listen("tcp", fmt.Sprintf("%v:%d", localIP, *port))
@@ -33,21 +42,11 @@ func main() {
 	fmt.Printf("Listening on %v:%d\n", localIP, *port)
 
 	grpcServer := grpc.NewServer()
+	conf := setConfig()
 
 	messaging.RegisterOverlayRegistrationServer(grpcServer, registration.New(grpcOpts, conf))
 	err = grpcServer.Serve(listener)
 	if err != nil {
 		log.Fatalf("server error: %v", err)
-	}
-}
-
-func setConfig() config.RegistrationServer {
-	flag.Parse()
-
-	return config.RegistrationServer{
-		Port:        *port,
-		Rounds:      *rounds,
-		Connections: *connections,
-		Peers:       *peers,
 	}
 }
