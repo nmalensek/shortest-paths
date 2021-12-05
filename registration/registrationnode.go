@@ -2,17 +2,16 @@ package registration
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"math/rand"
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type dialer interface {
@@ -50,17 +49,17 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node) (*messaging.RegistrationResponse, error) {
 	_, present := s.registeredNodes[n.GetId()]
 	if present {
-		return nil, errors.New("address already registered")
+		return nil, status.Error(codes.AlreadyExists, "address already registered")
 	}
 
 	addr := strings.Split(n.GetId(), ":")
 	if len(addr) != 2 {
-		return nil, errors.New("node ID must be in the format host:port")
+		return nil, status.Error(codes.InvalidArgument, "node ID must be in the format host:port")
 	}
 
 	a, err := net.ResolveTCPAddr("tcp", n.GetId())
 	if err != nil {
-		return nil, errors.New("TCP address not formatted properly")
+		return nil, status.Error(codes.InvalidArgument, "TCP address not formatted properly")
 	}
 
 	s.mu.Lock()
@@ -69,7 +68,8 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 	s.registeredNodes[n.GetId()] = n
 	conn, err := s.dial(fmt.Sprintf("%v:%v", a.IP, a.Port), s.opts...)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to server %v:%v", a.IP, a.Port)
+		return nil, status.Errorf(codes.FailedPrecondition, "failed to connect to %v:%v, ensure server is listening on that port",
+			a.IP, a.Port)
 	}
 	pClient := messaging.NewPathMessengerClient(conn)
 	s.nodeConnections = append(s.nodeConnections, pClient)
@@ -86,12 +86,13 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 
 	if s.overlaySent {
 		// TODO: allow deregistration; update the shortest paths and re-send.
-		return &messaging.DeregistrationResponse{}, errors.New("overlay has been sent, cannot deregister node")
+		return &messaging.DeregistrationResponse{}, status.Errorf(codes.FailedPrecondition,
+			"overlay has been sent, cannot deregister node")
 	}
 
 	_, ok := s.registeredNodes[n.GetId()]
 	if !ok {
-		return &messaging.DeregistrationResponse{}, fmt.Errorf("could not find node %v", n.GetId())
+		return &messaging.DeregistrationResponse{}, status.Errorf(codes.NotFound, "could not find node %v", n.GetId())
 	}
 
 	delete(s.registeredNodes, n.GetId())
@@ -101,7 +102,7 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 
 func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messaging.OverlayRegistration_GetOverlayServer) error {
 	if !s.overlaySent {
-		return errors.New("overlay has not been set up yet.")
+		return status.Error(codes.FailedPrecondition, "overlay has not been set up yet")
 	}
 
 	for _, edge := range s.overlay {
@@ -124,25 +125,6 @@ func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging
 	}
 
 	return &messaging.MetadataConfirmation{}, nil
-}
-
-var weightGenerator = rand.New(rand.NewSource(time.Now().Unix()))
-
-func (s *RegistrationServer) randomWeight() int {
-	return weightGenerator.Intn(51)
-}
-
-func (s *RegistrationServer) setRandomConnections() {
-	// copy the original list, remove nodes once they have the desired number of connections.
-	nodesNeedingConns := make([]*messaging.Node, len(s.registeredNodes))
-	for _, v := range s.registeredNodes {
-		nodesNeedingConns = append(nodesNeedingConns, v)
-	}
-
-	// randomly select nodes from the list, excluding the current node getting connections assigned.
-
-	// record those connections as new edges (edges are bidirectional in this overlay)
-
 }
 
 func printMetadata(d map[string]*messaging.MessagingMetadata) {
