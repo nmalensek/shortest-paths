@@ -8,13 +8,6 @@ import (
 	"github.com/nmalensek/shortest-paths/messaging"
 )
 
-type graph struct {
-}
-
-func getShortestPaths() {
-
-}
-
 var weightGenerator = rand.New(rand.NewSource(time.Now().Unix()))
 
 func randomWeight(rd *rand.Rand) int {
@@ -40,13 +33,13 @@ func buildOverlay(nodeList []*messaging.Node, reqConns int, randomize bool) []*m
 		targetIndex := ((i + len(nodeList)) - startPoint) % len(nodeList)
 		checkedSelf := false
 
-		for len(connections[n.Id]) < reqConns {
+		for len(connMap[n.Id]) < reqConns {
 			// nodes can't connect to themselves
 			if targetIndex == i {
 
 				// if we get to this node a second time, we can't hit reqConns
 				if checkedSelf {
-					fmt.Printf("node %v cannot find new connections, aborting with the following connections: %v",
+					fmt.Printf("node %v cannot find new connections, aborting with the following connections: %v\n",
 						n.Id, connections[n.Id])
 					break
 				}
@@ -83,11 +76,16 @@ func makeConnection(edgeMap map[string][]*messaging.Edge, connMap map[string]map
 		Destination: targetNode,
 		Weight:      int32(randomWeight(weightGenerator)),
 	}
+
 	edgeMap[sourceNode.Id] = append(edgeMap[sourceNode.Id], edge)
-	connMap[sourceNode.Id] = map[string]struct{}{
-		targetNode.Id: {},
+
+	if connMap[sourceNode.Id] == nil {
+		connMap[sourceNode.Id] = make(map[string]struct{})
 	}
-	connMap[targetNode.Id] = map[string]struct{}{
-		sourceNode.Id: {},
+	connMap[sourceNode.Id][targetNode.Id] = struct{}{}
+
+	if connMap[targetNode.Id] == nil {
+		connMap[targetNode.Id] = make(map[string]struct{})
 	}
+	connMap[targetNode.Id][sourceNode.Id] = struct{}{}
 }

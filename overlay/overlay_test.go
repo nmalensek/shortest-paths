@@ -13,51 +13,13 @@ func Test_buildOverlay(t *testing.T) {
 		randomize bool
 	}
 
-	nodes := []*messaging.Node{
+	sixNodes := []*messaging.Node{
 		{Id: "0"},
 		{Id: "1"},
 		{Id: "2"},
 		{Id: "3"},
 		{Id: "4"},
 		{Id: "5"},
-	}
-
-	edges := []*messaging.Edge{
-		{Source: nodes[0], Destination: nodes[5]},
-		{Source: nodes[5], Destination: nodes[0]},
-
-		{Source: nodes[0], Destination: nodes[4]},
-		{Source: nodes[4], Destination: nodes[0]},
-
-		{Source: nodes[0], Destination: nodes[1]},
-		{Source: nodes[1], Destination: nodes[0]},
-
-		{Source: nodes[0], Destination: nodes[2]},
-		{Source: nodes[2], Destination: nodes[0]},
-
-		{Source: nodes[1], Destination: nodes[5]},
-		{Source: nodes[5], Destination: nodes[1]},
-
-		{Source: nodes[1], Destination: nodes[2]},
-		{Source: nodes[2], Destination: nodes[1]},
-
-		{Source: nodes[1], Destination: nodes[3]},
-		{Source: nodes[3], Destination: nodes[1]},
-
-		{Source: nodes[2], Destination: nodes[3]},
-		{Source: nodes[3], Destination: nodes[2]},
-
-		{Source: nodes[2], Destination: nodes[4]},
-		{Source: nodes[4], Destination: nodes[2]},
-
-		{Source: nodes[3], Destination: nodes[4]},
-		{Source: nodes[4], Destination: nodes[3]},
-
-		{Source: nodes[3], Destination: nodes[5]},
-		{Source: nodes[5], Destination: nodes[3]},
-
-		{Source: nodes[4], Destination: nodes[5]},
-		{Source: nodes[5], Destination: nodes[4]},
 	}
 
 	tests := []struct {
@@ -68,11 +30,40 @@ func Test_buildOverlay(t *testing.T) {
 		{
 			name: "non-random 6 node overlay with 4 connections",
 			args: args{
-				nodeList:  nodes,
+				nodeList:  sixNodes,
 				reqConns:  4,
 				randomize: false,
 			},
-			want: edges,
+			want: []*messaging.Edge{
+				{Source: sixNodes[0], Destination: sixNodes[5]},
+				{Source: sixNodes[0], Destination: sixNodes[4]},
+				{Source: sixNodes[0], Destination: sixNodes[1]},
+				{Source: sixNodes[0], Destination: sixNodes[2]},
+				{Source: sixNodes[1], Destination: sixNodes[5]},
+				{Source: sixNodes[1], Destination: sixNodes[2]},
+				{Source: sixNodes[1], Destination: sixNodes[3]},
+				{Source: sixNodes[2], Destination: sixNodes[3]},
+				{Source: sixNodes[2], Destination: sixNodes[4]},
+				{Source: sixNodes[3], Destination: sixNodes[4]},
+				{Source: sixNodes[3], Destination: sixNodes[5]},
+				{Source: sixNodes[4], Destination: sixNodes[5]},
+			},
+		},
+		{
+			name: "non-random 4 node overlay with 4 connections desired; end with 3 connections each",
+			args: args{
+				nodeList:  sixNodes[:4],
+				reqConns:  4,
+				randomize: false,
+			},
+			want: []*messaging.Edge{
+				{Source: sixNodes[0], Destination: sixNodes[3]},
+				{Source: sixNodes[0], Destination: sixNodes[2]},
+				{Source: sixNodes[0], Destination: sixNodes[1]},
+				{Source: sixNodes[1], Destination: sixNodes[2]},
+				{Source: sixNodes[1], Destination: sixNodes[3]},
+				{Source: sixNodes[2], Destination: sixNodes[3]},
+			},
 		},
 	}
 	for _, tt := range tests {
