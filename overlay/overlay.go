@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 
@@ -21,6 +22,7 @@ func randomWeight(rd *rand.Rand) int {
 }
 
 func buildOverlay(nodeList []*messaging.Node, reqConns int, randomize bool) []*messaging.Edge {
+	// storing as a map so it's easier to pass the edge slice to the makeConnection func
 	connections := make(map[string][]*messaging.Edge, len(nodeList))
 	// source nodeId <-> dest nodeId; used to track existing connections per node
 	connMap := make(map[string]map[string]struct{}, len(nodeList))
@@ -31,33 +33,61 @@ func buildOverlay(nodeList []*messaging.Node, reqConns int, randomize bool) []*m
 		})
 	}
 
-	// connect each node to reqConns other nodes
-	for _, n := range nodeList {
-		targetNodeIndex := len(nodeList) - 1
-		for len(connections[n.Id]) < reqConns {
-			targetNode := nodeList[targetNodeIndex%len(nodeList)]
+	// connect to nodes on either side of the current node, roughly half behind and half in front
+	startPoint := (reqConns / 2)
 
-			// because edges are bi-directional, update and check both sides per connection.
-			_, currentToOther := connMap[n.Id][targetNode.Id]
-			_, otherToCurrent := connMap[targetNode.Id][n.Id]
-			if n != targetNode && !currentToOther && !otherToCurrent {
-				edge := &messaging.Edge{
-					Source:      n,
-					Destination: targetNode,
-					Weight:      int32(randomWeight(weightGenerator)),
+	for i, n := range nodeList {
+		targetIndex := ((i + len(nodeList)) - startPoint) % len(nodeList)
+		checkedSelf := false
+
+		for len(connections[n.Id]) < reqConns {
+			// nodes can't connect to themselves
+			if targetIndex == i {
+
+				// if we get to this node a second time, we can't hit reqConns
+				if checkedSelf {
+					fmt.Printf("node %v cannot find new connections, aborting with the following connections: %v",
+						n.Id, connections[n.Id])
+					break
 				}
-				connections[n.Id] = append(connections[n.Id], edge)
-				connMap[n.Id] = map[string]struct{}{
-					targetNode.Id: {},
-				}
-				connMap[targetNode.Id] = map[string]struct{}{
-					n.Id: {},
+
+				checkedSelf = true
+			} else {
+				targetNode := nodeList[targetIndex]
+
+				// because edges are bi-directional, update and check both sides per connection.
+				_, currentToOther := connMap[n.Id][targetNode.Id]
+				_, otherToCurrent := connMap[targetNode.Id][n.Id]
+				if !currentToOther && !otherToCurrent {
+					makeConnection(connections, connMap, n, targetNode)
 				}
 			}
 
-			targetNodeIndex++
+			targetIndex = (targetIndex + 1) % len(nodeList)
+
 		}
 	}
 
-	return []*messaging.Edge{}
+	edges := make([]*messaging.Edge, 0, len(nodeList))
+	for _, v := range connections {
+		edges = append(edges, v...)
+	}
+
+	return edges
+}
+
+func makeConnection(edgeMap map[string][]*messaging.Edge, connMap map[string]map[string]struct{},
+	sourceNode *messaging.Node, targetNode *messaging.Node) {
+	edge := &messaging.Edge{
+		Source:      sourceNode,
+		Destination: targetNode,
+		Weight:      int32(randomWeight(weightGenerator)),
+	}
+	edgeMap[sourceNode.Id] = append(edgeMap[sourceNode.Id], edge)
+	connMap[sourceNode.Id] = map[string]struct{}{
+		targetNode.Id: {},
+	}
+	connMap[targetNode.Id] = map[string]struct{}{
+		sourceNode.Id: {},
+	}
 }
