@@ -6,9 +6,11 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
+	"github.com/nmalensek/shortest-paths/overlay"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,6 +78,10 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 
 	fmt.Printf("registered node: %v\n", n.String())
 
+	if len(s.registeredNodes) == s.settings.Peers {
+		go s.constructTask()
+	}
+
 	return &messaging.RegistrationResponse{}, nil
 }
 
@@ -108,6 +114,39 @@ func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messagi
 	for _, edge := range s.overlay {
 		if err := stream.Send(edge); err != nil {
 			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *RegistrationServer) constructTask() error {
+
+	// build the overlay
+	nodes := make([]*messaging.Node, 0, len(s.registeredNodes))
+	for _, n := range s.registeredNodes {
+		nodes = append(nodes, n)
+	}
+
+	s.overlay = overlay.BuildOverlay(nodes, s.settings.Connections, true)
+
+	// push to edges
+	for _, n := range s.nodeConnections {
+		stream, err := n.PushPaths(context.WithDeadline(context.Background(), time.Now().Add(time.Second*15)))
+		if err != nil {
+			fmt.Printf("%v.PushPaths failed: %v", n, err)
+			continue
+		}
+		for _, e := range s.overlay {
+			if err := stream.Send(e); err != nil {
+				fmt.Printf("%v.Send(%v) failed: %v", stream, e, err)
+				continue
+			}
+		}
+		_, err = stream.CloseAndRecv()
+		if err != nil {
+			fmt.Printf("%v.CloseAndRecv() failed: %v", stream, err)
+			continue
 		}
 	}
 

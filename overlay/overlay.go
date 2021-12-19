@@ -14,7 +14,10 @@ func randomWeight(rd *rand.Rand) int {
 	return rd.Intn(51)
 }
 
-func buildOverlay(nodeList []*messaging.Node, reqConns int, randomize bool) []*messaging.Edge {
+// BuildOverlay builds an overlay using the given list of nodes and randomizes connections if desired.
+// reqConns will be attempted to be fulfilled but is best effort if an incompatible reqConns is given relative
+// to the size of nodeList.
+func BuildOverlay(nodeList []*messaging.Node, reqConns int, randomize bool) []*messaging.Edge {
 	// storing as a map so it's easier to pass the edge slice to the makeConnection func
 	connections := make(map[string][]*messaging.Edge, len(nodeList))
 	// source nodeId <-> dest nodeId; used to track existing connections per node

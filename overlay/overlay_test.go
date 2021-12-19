@@ -68,7 +68,7 @@ func Test_buildOverlay(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildOverlay(tt.args.nodeList, tt.args.reqConns, tt.args.randomize)
+			got := BuildOverlay(tt.args.nodeList, tt.args.reqConns, tt.args.randomize)
 			if len(got) != len(tt.want) {
 				t.Errorf("connection count mismatch, got %v want %v", len(got), len(tt.want))
 			}
