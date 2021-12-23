@@ -79,6 +79,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 	fmt.Printf("registered node: %v\n", n.String())
 
 	if len(s.registeredNodes) == s.settings.Peers {
+		// TODO: do this from a cli client
 		go s.constructTask()
 	}
 
@@ -149,6 +150,8 @@ func (s *RegistrationServer) constructTask() error {
 			continue
 		}
 	}
+
+	// start task if all received the stream correctly.
 
 	return nil
 }

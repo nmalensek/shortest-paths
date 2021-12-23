@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -39,14 +40,25 @@ type messengerServer struct {
 	payloadSent      int64
 	payloadReceived  int64
 	nodePathDict     map[string]*messaging.Node
+	overlayEdges     []*messaging.Edge
 }
 
 func (s *messengerServer) StartTask(context.Context, *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
 	return nil, nil
 }
 
-func (s *messengerServer) PushPaths(messaging.PathMessenger_PushPathsServer) error {
-	return nil
+func (s *messengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServer) error {
+	for {
+		edge, err := stream.Recv()
+		if err == io.EOF {
+			return stream.SendAndClose(&messaging.ConnectionResponse{})
+		}
+		if err != nil {
+			return err
+		}
+
+		s.overlayEdges = append(s.overlayEdges, edge)
+	}
 }
 
 // Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
