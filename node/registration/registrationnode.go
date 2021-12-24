@@ -23,12 +23,13 @@ type dialer interface {
 // RegistrationServer contains everything needed to orchestrate overlay nodes' task(s).
 type RegistrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
-	mu          sync.RWMutex
-	settings    config.RegistrationServer
-	overlaySent bool
-	opts        []grpc.DialOption
-	dial        func(string, ...grpc.DialOption) (*grpc.ClientConn, error)
-	metadata    map[string]*messaging.MessagingMetadata
+	mu                  sync.RWMutex
+	settings            config.RegistrationServer
+	overlaySent         bool
+	opts                []grpc.DialOption
+	dial                func(string, ...grpc.DialOption) (*grpc.ClientConn, error)
+	metadata            map[string]*messaging.MessagingMetadata
+	newRegistrationChan chan struct{}
 
 	// Nodes that have registered; used to build the overlay.
 	registeredNodes map[string]*messaging.Node
@@ -41,12 +42,16 @@ type RegistrationServer struct {
 
 // New provides a new instance of RegistrationServer.
 func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationServer {
-	return &RegistrationServer{
-		registeredNodes: make(map[string]*messaging.Node),
-		dial:            grpc.Dial,
-		opts:            opts,
-		settings:        conf,
+	rs := &RegistrationServer{
+		registeredNodes:     make(map[string]*messaging.Node),
+		dial:                grpc.Dial,
+		opts:                opts,
+		settings:            conf,
+		newRegistrationChan: make(chan struct{}),
 	}
+	go rs.monitorOverlayStatus()
+
+	return rs
 }
 
 //RegisterNode stores the address of the sender in a map of known nodes.
@@ -84,10 +89,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 
 	fmt.Printf("registered node: %v\n", n.String())
 
-	if len(s.registeredNodes) == s.settings.Peers {
-		// TODO: do this from a cli client
-		go s.constructTask()
-	}
+	s.newRegistrationChan <- struct{}{}
 
 	return &messaging.RegistrationResponse{}, nil
 }
@@ -135,7 +137,8 @@ func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messagi
 	return nil
 }
 
-func (s *RegistrationServer) constructTask() error {
+func (s *RegistrationServer) constructTask() []error {
+	errs := make([]error, 0)
 
 	// build the overlay
 	nodes := make([]*messaging.Node, 0, len(s.registeredNodes))
@@ -152,23 +155,41 @@ func (s *RegistrationServer) constructTask() error {
 	for _, n := range s.nodeConnections {
 		stream, err := n.PushPaths(ctx)
 		if err != nil {
-			fmt.Printf("%v.PushPaths failed: %v", n, err)
+			errs = append(errs, fmt.Errorf("%v.PushPaths failed: %v", n, err))
 			continue
 		}
 		for _, e := range s.overlay {
 			if err := stream.Send(e); err != nil {
-				fmt.Printf("%v.Send(%v) failed: %v", stream, e, err)
+				errs = append(errs, fmt.Errorf("%v.Send(%v) failed: %v\n", stream, e, err))
 				continue
 			}
 		}
 		_, err = stream.CloseAndRecv()
 		if err != nil {
-			fmt.Printf("%v.CloseAndRecv() failed: %v", stream, err)
+			errs = append(errs, fmt.Errorf("%v.CloseAndRecv() failed: %v\n", stream, err))
 			continue
 		}
 	}
 
-	return nil
+	return errs
+}
+
+func (s *RegistrationServer) monitorOverlayStatus() {
+	for {
+		<-s.newRegistrationChan
+		if len(s.registeredNodes) == s.settings.Peers {
+			// TODO: do this from a cli client
+			errs := s.constructTask()
+			if len(errs) > 0 {
+				fmt.Println("task construction failed with the following errors:")
+				for _, e := range errs {
+					fmt.Println(e)
+				}
+			}
+			return
+		}
+	}
+
 }
 
 // ProcessMetadata prints out formatted metadata about the most recently completed task.
