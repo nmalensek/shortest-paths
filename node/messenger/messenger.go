@@ -13,20 +13,31 @@ import (
 // MessengerServer is an instance of a messenger (worker) in an overlay
 type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
-	mu               sync.Mutex
+	mu           sync.Mutex
+	taskComplete bool
+	workChan     chan messaging.PathMessage
+	pathChan     chan struct{}
+
+	nodePathDict map[string]*messaging.Node
+	overlayEdges []*messaging.Edge
+
 	totalCount       int64
 	messagesSent     int64
 	messagesReceived int64
 	messagesRelayed  int64
 	payloadSent      int64
 	payloadReceived  int64
-	nodePathDict     map[string]*messaging.Node
-	overlayEdges     []*messaging.Edge
 }
 
 // New returns a new instance of MessengerServer.
 func New() *MessengerServer {
-	return &MessengerServer{nodePathDict: make(map[string]*messaging.Node)}
+	ms := &MessengerServer{
+		nodePathDict: make(map[string]*messaging.Node),
+		pathChan:     make(chan struct{}),
+	}
+	go ms.calculatePathsWhenReady()
+
+	return ms
 }
 
 // StartTask starts the messenger's task.
@@ -43,6 +54,7 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 	for {
 		edge, err := stream.Recv()
 		if err == io.EOF {
+			s.pathChan <- struct{}{}
 			return stream.SendAndClose(&messaging.ConnectionResponse{})
 		}
 		if err != nil {
@@ -51,6 +63,16 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 
 		s.overlayEdges = append(s.overlayEdges, edge)
 	}
+}
+
+func (s *MessengerServer) calculatePathsWhenReady() {
+	<-s.pathChan
+	// calculate shortest paths for each node
+
+	// initialize proper number of workers based on overlay size
+
+	// tell registration node this node's ready
+
 }
 
 // ProcessMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.

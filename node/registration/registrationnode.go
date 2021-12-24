@@ -31,6 +31,9 @@ type RegistrationServer struct {
 	metadata            map[string]*messaging.MessagingMetadata
 	newRegistrationChan chan struct{}
 
+	nodeStatusChan chan struct{}
+	idleNodes      map[string]struct{}
+
 	// Nodes that have registered; used to build the overlay.
 	registeredNodes map[string]*messaging.Node
 
@@ -48,6 +51,7 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 		opts:                opts,
 		settings:            conf,
 		newRegistrationChan: make(chan struct{}),
+		nodeStatusChan:      make(chan struct{}),
 	}
 	go rs.monitorOverlayStatus()
 
@@ -89,7 +93,9 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 
 	fmt.Printf("registered node: %v\n", n.String())
 
-	s.newRegistrationChan <- struct{}{}
+	if len(s.registeredNodes) == s.settings.Peers {
+		s.newRegistrationChan <- struct{}{}
+	}
 
 	return &messaging.RegistrationResponse{}, nil
 }
@@ -116,6 +122,8 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 
 	delete(s.registeredNodes, n.GetId())
 
+	fmt.Printf("node %v successfully deregistered\n", n.GetId())
+
 	return &messaging.DeregistrationResponse{}, nil
 }
 
@@ -137,7 +145,7 @@ func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messagi
 	return nil
 }
 
-func (s *RegistrationServer) constructTask() []error {
+func (s *RegistrationServer) buildAndPushOverlay() []error {
 	errs := make([]error, 0)
 
 	// build the overlay
@@ -176,18 +184,23 @@ func (s *RegistrationServer) constructTask() []error {
 
 func (s *RegistrationServer) monitorOverlayStatus() {
 	for {
-		<-s.newRegistrationChan
-		if len(s.registeredNodes) == s.settings.Peers {
+		select {
+		case <-s.newRegistrationChan:
 			// TODO: do this from a cli client
-			errs := s.constructTask()
+			errs := s.buildAndPushOverlay()
 			if len(errs) > 0 {
 				fmt.Println("task construction failed with the following errors:")
 				for _, e := range errs {
 					fmt.Println(e)
 				}
 			}
-			return
+		case <-s.nodeStatusChan:
+			// new message type: ready/finished
+			// if ready, add to list of idle nodes. if that list == overlay size, start task
+			// clear list
+			// if finished, add node to list of idle nodes. if that list == overlay size, request metadata
 		}
+
 	}
 
 }

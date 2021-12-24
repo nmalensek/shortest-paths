@@ -9,7 +9,7 @@ import (
 	"github.com/nmalensek/shortest-paths/addressing"
 	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
-	"github.com/nmalensek/shortest-paths/registration"
+	"github.com/nmalensek/shortest-paths/node/registration"
 	"google.golang.org/grpc"
 )
 

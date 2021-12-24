@@ -22,9 +22,6 @@ import (
 var (
 	registrationIP   = flag.String("regIp", "127.0.0.1", "The IP address of the registration node")
 	registrationPort = flag.Int("regPort", 10000, "The port the registration node is using")
-	taskComplete     = false
-	numWorkers       = 5
-	workChannel      = make(chan messaging.PathMessage, numWorkers)
 
 	helpText = `this is the help text that will list the available commands eventually`
 )
@@ -91,6 +88,7 @@ func main() {
 		command := scanner.Text()
 		switch command {
 		case "exit":
+			regClient.DeregisterNode(context.Background(), &messaging.Node{Id: myIP})
 			os.Exit(0)
 		default:
 			fmt.Printf("command %v not recognized, available options are:\n%v\n", command, helpText)
