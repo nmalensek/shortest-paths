@@ -131,9 +131,12 @@ func (s *RegistrationServer) constructTask() error {
 
 	s.overlay = overlay.BuildOverlay(nodes, s.settings.Connections, true)
 
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*15))
+	defer cancel()
+
 	// push to edges
 	for _, n := range s.nodeConnections {
-		stream, err := n.PushPaths(context.WithDeadline(context.Background(), time.Now().Add(time.Second*15)))
+		stream, err := n.PushPaths(ctx)
 		if err != nil {
 			fmt.Printf("%v.PushPaths failed: %v", n, err)
 			continue

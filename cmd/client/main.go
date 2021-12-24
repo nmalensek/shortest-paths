@@ -5,15 +5,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/nmalensek/shortest-paths/addressing"
+	"github.com/nmalensek/shortest-paths/node/messenger"
 
 	"github.com/nmalensek/shortest-paths/messaging"
 
@@ -30,63 +29,6 @@ var (
 	helpText = `this is the help text that will list the available commands eventually`
 )
 
-type messengerServer struct {
-	messaging.UnimplementedPathMessengerServer
-	mu               sync.Mutex
-	totalCount       int64
-	messagesSent     int64
-	messagesReceived int64
-	messagesRelayed  int64
-	payloadSent      int64
-	payloadReceived  int64
-	nodePathDict     map[string]*messaging.Node
-	overlayEdges     []*messaging.Edge
-}
-
-func (s *messengerServer) StartTask(context.Context, *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
-	return nil, nil
-}
-
-func (s *messengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServer) error {
-	for {
-		edge, err := stream.Recv()
-		if err == io.EOF {
-			return stream.SendAndClose(&messaging.ConnectionResponse{})
-		}
-		if err != nil {
-			return err
-		}
-
-		s.overlayEdges = append(s.overlayEdges, edge)
-	}
-}
-
-// Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-func (s *messengerServer) ProcessMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
-	return nil, nil
-}
-
-// Transmits metadata about the messages the node has sent and received over the course of the task.
-// Technically shouldn't have to worry about locking here because metadata sends should happen at the end
-// of the run if everything goes well, but this might help if it's called early (debugging or something's wrong).
-func (s *messengerServer) GetMessagingData(context.Context, *messaging.MessagingDataRequest) (*messaging.MessagingMetadata, error) {
-	s.mu.Lock()
-	data := &messaging.MessagingMetadata{
-		MessagesSent:     s.messagesSent,
-		MessagesReceived: s.messagesReceived,
-		MessagesRelayed:  s.messagesRelayed,
-		PayloadSent:      s.payloadSent,
-		PayloadReceived:  s.payloadReceived,
-	}
-	s.mu.Unlock()
-
-	return data, nil
-}
-
-func newPeerServer() *messengerServer {
-	return &messengerServer{nodePathDict: make(map[string]*messaging.Node)}
-}
-
 func startPeerService(c chan string) {
 	addr := addressing.GetIP()
 	go func() {
@@ -97,7 +39,7 @@ func startPeerService(c chan string) {
 		c <- listen.Addr().String()
 
 		peerServe := grpc.NewServer()
-		messaging.RegisterPathMessengerServer(peerServe, newPeerServer())
+		messaging.RegisterPathMessengerServer(peerServe, messenger.New())
 		serveErr := peerServe.Serve(listen)
 		if serveErr != nil {
 			log.Fatalf("server error: %v", serveErr)
@@ -106,7 +48,7 @@ func startPeerService(c chan string) {
 }
 
 func registerToOverlay(c messaging.OverlayRegistrationClient, serveAddr string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*2))
 	defer cancel()
 
 	_, err := c.RegisterNode(ctx, &messaging.Node{Id: serveAddr})
