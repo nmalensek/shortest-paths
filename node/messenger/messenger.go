@@ -6,6 +6,8 @@ import (
 	"sync"
 
 	"github.com/nmalensek/shortest-paths/messaging"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // MessengerServer is an instance of a messenger (worker) in an overlay
@@ -22,16 +24,22 @@ type MessengerServer struct {
 	overlayEdges     []*messaging.Edge
 }
 
-// New returns a new instance of MessengerServer
+// New returns a new instance of MessengerServer.
 func New() *MessengerServer {
 	return &MessengerServer{nodePathDict: make(map[string]*messaging.Node)}
 }
 
+// StartTask starts the messenger's task.
 func (s *MessengerServer) StartTask(context.Context, *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
 	return nil, nil
 }
 
+// PushPaths receives the stream of edges that make up the overlay the node is part of.
 func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServer) error {
+	if stream.Context().Err() == context.Canceled {
+		return status.Error(codes.Canceled, "sender canceled path push, aborting...")
+	}
+
 	for {
 		edge, err := stream.Recv()
 		if err == io.EOF {
@@ -45,15 +53,15 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 	}
 }
 
-// Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
+// ProcessMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
 func (s *MessengerServer) ProcessMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
 	return nil, nil
 }
 
-// Transmits metadata about the messages the node has sent and received over the course of the task.
-// Technically shouldn't have to worry about locking here because metadata sends should happen at the end
-// of the run if everything goes well, but this might help if it's called early (debugging or something's wrong).
+// GetMessagingData transmits metadata about the messages the node has sent and received over the course of the task.
 func (s *MessengerServer) GetMessagingData(context.Context, *messaging.MessagingDataRequest) (*messaging.MessagingMetadata, error) {
+	// Technically shouldn't have to worry about locking here because metadata sends should happen at the end
+	// of the run if everything goes well, but this might help if it's called early (debugging or something's wrong).
 	s.mu.Lock()
 	data := &messaging.MessagingMetadata{
 		MessagesSent:     s.messagesSent,

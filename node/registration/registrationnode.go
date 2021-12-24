@@ -20,9 +20,10 @@ type dialer interface {
 	DialFunc(target string, opts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
+// RegistrationServer contains everything needed to orchestrate overlay nodes' task(s).
 type RegistrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	settings    config.RegistrationServer
 	overlaySent bool
 	opts        []grpc.DialOption
@@ -38,6 +39,7 @@ type RegistrationServer struct {
 	overlay []*messaging.Edge
 }
 
+// New provides a new instance of RegistrationServer.
 func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationServer {
 	return &RegistrationServer{
 		registeredNodes: make(map[string]*messaging.Node),
@@ -49,6 +51,10 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 
 //RegisterNode stores the address of the sender in a map of known nodes.
 func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node) (*messaging.RegistrationResponse, error) {
+	if ctx.Err() == context.Canceled {
+		return &messaging.RegistrationResponse{}, status.Error(codes.Canceled, "client canceled registration, aborting")
+	}
+
 	_, present := s.registeredNodes[n.GetId()]
 	if present {
 		return nil, status.Error(codes.AlreadyExists, "address already registered")
@@ -88,6 +94,10 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 
 //DeregisterNode removes the node address from the map of known nodes.
 func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.Node) (*messaging.DeregistrationResponse, error) {
+	if ctx.Err() == context.Canceled {
+		return &messaging.DeregistrationResponse{}, status.Error(codes.Canceled, "client canceled de-registration, abandoning")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -107,10 +117,14 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 	return &messaging.DeregistrationResponse{}, nil
 }
 
+// GetOverlay returns the current state of the overlay as a stream of edges.
 func (s *RegistrationServer) GetOverlay(e *messaging.EdgeRequest, stream messaging.OverlayRegistration_GetOverlayServer) error {
 	if !s.overlaySent {
 		return status.Error(codes.FailedPrecondition, "overlay has not been set up yet")
 	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	for _, edge := range s.overlay {
 		if err := stream.Send(edge); err != nil {
@@ -154,14 +168,13 @@ func (s *RegistrationServer) constructTask() error {
 		}
 	}
 
-	// start task if all received the stream correctly.
-
 	return nil
 }
 
+// ProcessMetadata prints out formatted metadata about the most recently completed task.
 func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging.MessagingMetadata) (*messaging.MetadataConfirmation, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
 	s.metadata[mmd.GetSender().Id] = mmd
 
