@@ -69,7 +69,7 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	<-s.pathChan
 	// calculate shortest paths for each node
 
-	// initialize proper number of workers based on overlay size
+	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
 
 	// tell registration node this node's ready
 
