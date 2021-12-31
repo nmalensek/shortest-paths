@@ -16,18 +16,19 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 	heap.Init(&unvisited)
 
 	visited := make(map[string]struct{})
-	path := make([]string, 0)
 
 	for {
 		if len(unvisited) == 0 {
 			return nil, fmt.Errorf("failed to calculate shortest path from %v to %v; unvisited is empty", sourceAddr, destAddr)
 		}
 		node = heap.Pop(&unvisited).(*graphEdge)
-		path = append(path, node.address)
+		node.path = append(node.path, node.address)
+
 		if node.address == destAddr {
 			// exclude first in path (start node)
-			return path[1:], nil
+			return node.path[1:], nil
 		}
+
 		visited[node.address] = struct{}{}
 		for _, n := range connections[node.address] {
 			_, inVisited := visited[n.Destination.Id]
@@ -36,11 +37,12 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 				heap.Push(&unvisited, &graphEdge{
 					address: n.Destination.Id,
 					weight:  int(n.Weight),
+					path:    node.path,
 				})
 			} else if inUnvisited {
 				current := item.(*graphEdge)
 				if current.weight > int(n.Weight) {
-					unvisited.update(current, current.address, int(n.Weight))
+					unvisited.update(current, current.address, int(n.Weight), node.path)
 				}
 			}
 		}
@@ -50,8 +52,9 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 // Adapted from https://pkg.go.dev/container/heap@go1.17.5
 // A graphEdge is something we manage in a priority queue.
 type graphEdge struct {
-	address string // The value of the item; arbitrary.
-	weight  int    // The priority of the item in the queue.
+	address string   // The value of the item; arbitrary.
+	weight  int      // The priority of the item in the queue.
+	path    []string // The node addresses making up the shortest path.
 	// The index is needed by update and is maintained by the heap.Interface methods.
 	index int // The index of the item in the heap.
 }
@@ -89,9 +92,10 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 // update modifies the priority and value of a graphEdge in the queue.
-func (pq *PriorityQueue) update(item *graphEdge, address string, weight int) {
+func (pq *PriorityQueue) update(item *graphEdge, address string, weight int, newPath []string) {
 	item.address = address
 	item.weight = weight
+	item.path = newPath
 	heap.Fix(pq, item.index)
 }
 

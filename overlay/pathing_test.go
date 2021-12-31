@@ -48,6 +48,49 @@ func makeOverlay() map[string][]*messaging.Edge {
 	}
 }
 
+func makeTridentOverlay() map[string][]*messaging.Edge {
+	return map[string][]*messaging.Edge{
+		"node1": {
+			makeEdge("node1", "node2", 40),
+			makeEdge("node1", "node3", 40),
+			makeEdge("node1", "node4", 43),
+		},
+		"node2": {
+			makeEdge("node2", "node1", 40),
+			makeEdge("node2", "node5", 10),
+		},
+		"node3": {
+			makeEdge("node3", "node1", 40),
+			makeEdge("node3", "node6", 9),
+		},
+		"node4": {
+			makeEdge("node4", "node1", 43),
+			makeEdge("node4", "node7", 22),
+		},
+		"node5": {
+			makeEdge("node5", "node2", 10),
+			makeEdge("node5", "node8", 1),
+		},
+		"node6": {
+			makeEdge("node6", "node3", 9),
+			makeEdge("node6", "node9", 3),
+		},
+		"node7": {
+			makeEdge("node7", "node4", 22),
+			makeEdge("node7", "node10", 17),
+		},
+		"node8": {
+			makeEdge("node8", "node5", 1),
+		},
+		"node9": {
+			makeEdge("node9", "node6", 3),
+		},
+		"node10": {
+			makeEdge("node10", "node7", 17),
+		},
+	}
+}
+
 func TestGetShortestPath(t *testing.T) {
 	type args struct {
 		sourceAddr  string
@@ -99,6 +142,26 @@ func TestGetShortestPath(t *testing.T) {
 			},
 			want:    []string{"node1", "node6", "node5"},
 			wantErr: false,
+		},
+		{
+			name: "successfully find shortest path from node 1 to node 9 in 10 node overlay",
+			args: args{
+				sourceAddr:  "node1",
+				destAddr:    "node9",
+				connections: makeTridentOverlay(),
+			},
+			want:    []string{"node3", "node6", "node9"},
+			wantErr: false,
+		},
+		{
+			name: "fail on empty overlay",
+			args: args{
+				sourceAddr:  "node1",
+				destAddr:    "na",
+				connections: make(map[string][]*messaging.Edge),
+			},
+			want:    nil,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
