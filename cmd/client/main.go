@@ -36,7 +36,7 @@ func startPeerService(c chan string) {
 		c <- listen.Addr().String()
 
 		peerServe := grpc.NewServer()
-		messaging.RegisterPathMessengerServer(peerServe, messenger.New())
+		messaging.RegisterPathMessengerServer(peerServe, messenger.New(listen.Addr().String()))
 		serveErr := peerServe.Serve(listen)
 		if serveErr != nil {
 			log.Fatalf("server error: %v", serveErr)

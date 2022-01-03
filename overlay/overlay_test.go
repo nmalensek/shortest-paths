@@ -6,7 +6,7 @@ import (
 	"github.com/nmalensek/shortest-paths/messaging"
 )
 
-func Test_buildOverlay(t *testing.T) {
+func Test_BuildOverlay(t *testing.T) {
 	type args struct {
 		nodeList  []*messaging.Node
 		reqConns  int

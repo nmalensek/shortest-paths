@@ -7,6 +7,22 @@ import (
 	"github.com/nmalensek/shortest-paths/messaging"
 )
 
+func GetAllShortestPaths(source string, dests map[string]struct{}, connections map[string][]*messaging.Edge) (map[string][]string, error) {
+	allPaths := make(map[string][]string)
+
+	for destNode := range dests {
+		res, err := GetShortestPath(source, destNode, connections)
+		if err != nil {
+			return nil, fmt.Errorf("could not calculate shortest paths for node %v; failed calculating path to %v: %v",
+				source, destNode, err)
+		}
+
+		allPaths[destNode] = res
+	}
+
+	return allPaths, nil
+}
+
 // GetShortestPath calculates the shortest path from source to destination given a slice of edges.
 func GetShortestPath(sourceAddr string, destAddr string, connections map[string][]*messaging.Edge) ([]string, error) {
 	node := &graphEdge{
@@ -31,11 +47,17 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 
 		visited[node.address] = struct{}{}
 		for _, n := range connections[node.address] {
-			_, inVisited := visited[n.Destination.Id]
-			item, inUnvisited := unvisited.Contains(n.Destination.Id)
+			// handle edges being bidirectional by using the end that's not the current node.
+			target := n.Destination.Id
+			if n.Destination.Id == node.address {
+				target = n.Source.Id
+			}
+
+			_, inVisited := visited[target]
+			item, inUnvisited := unvisited.Contains(target)
 			if !inVisited && !inUnvisited {
 				heap.Push(&unvisited, &graphEdge{
-					address: n.Destination.Id,
+					address: target,
 					weight:  int(n.Weight),
 					path:    node.path,
 				})

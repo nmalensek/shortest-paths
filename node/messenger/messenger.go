@@ -3,9 +3,11 @@ package messenger
 import (
 	"context"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/nmalensek/shortest-paths/messaging"
+	"github.com/nmalensek/shortest-paths/overlay"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -13,12 +15,13 @@ import (
 // MessengerServer is an instance of a messenger (worker) in an overlay
 type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
-	mu           sync.Mutex
-	taskComplete bool
-	workChan     chan messaging.PathMessage
-	pathChan     chan struct{}
+	serverAddress string
+	mu            sync.Mutex
+	taskComplete  bool
+	workChan      chan messaging.PathMessage
+	pathChan      chan struct{}
 
-	nodePathDict map[string]*messaging.Node
+	nodePathDict map[string][]string
 	overlayEdges []*messaging.Edge
 
 	totalCount       int64
@@ -30,10 +33,11 @@ type MessengerServer struct {
 }
 
 // New returns a new instance of MessengerServer.
-func New() *MessengerServer {
+func New(serverAddr string) *MessengerServer {
 	ms := &MessengerServer{
-		nodePathDict: make(map[string]*messaging.Node),
-		pathChan:     make(chan struct{}),
+		serverAddress: serverAddr,
+		nodePathDict:  make(map[string][]string),
+		pathChan:      make(chan struct{}),
 	}
 	go ms.calculatePathsWhenReady()
 
@@ -67,7 +71,30 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 
 func (s *MessengerServer) calculatePathsWhenReady() {
 	<-s.pathChan
-	// calculate shortest paths for each node
+	// map of each node to edges it's part of.
+	overlayConnections := make(map[string][]*messaging.Edge)
+	// keep track of all other nodes as nodes this one should connect to.
+	otherNodes := make(map[string]struct{})
+
+	for _, e := range s.overlayEdges {
+		if e.Source.Id != s.serverAddress {
+			otherNodes[e.Source.Id] = struct{}{}
+		}
+		if e.Destination.Id != s.serverAddress {
+			otherNodes[e.Destination.Id] = struct{}{}
+		}
+
+		overlayConnections[e.Source.Id] = append(overlayConnections[e.Source.Id], e)
+		overlayConnections[e.Destination.Id] = append(overlayConnections[e.Destination.Id], e)
+	}
+
+	paths, err := overlay.GetAllShortestPaths(s.serverAddress, otherNodes, overlayConnections)
+	if err != nil {
+		// TODO: send to registration node
+		log.Fatalf("failed to get shortest paths for node %v: %v", s.serverAddress, err)
+	}
+
+	s.nodePathDict = paths
 
 	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
 

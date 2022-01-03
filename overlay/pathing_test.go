@@ -23,14 +23,14 @@ func makeOverlay() map[string][]*messaging.Edge {
 			makeEdge("node1", "node3", 5),
 		},
 		"node2": {
-			makeEdge("node2", "node1", 3),
+			makeEdge("node1", "node2", 3),
 			makeEdge("node2", "node3", 10),
 			makeEdge("node2", "node4", 6),
 		},
 		"node3": {
-			makeEdge("node3", "node2", 10),
+			makeEdge("node2", "node3", 10),
 			makeEdge("node3", "node4", 14),
-			makeEdge("node3", "node1", 5),
+			makeEdge("node1", "node3", 5),
 		},
 		"node4": {
 			makeEdge("node4", "node3", 14),
