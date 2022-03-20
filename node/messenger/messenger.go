@@ -2,12 +2,17 @@ package messenger
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
+	"math"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/overlay"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -15,14 +20,16 @@ import (
 // MessengerServer is an instance of a messenger (worker) in an overlay
 type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
-	serverAddress string
-	mu            sync.Mutex
-	taskComplete  bool
-	workChan      chan messaging.PathMessage
-	pathChan      chan struct{}
+	serverAddress           string
+	mu                      sync.Mutex
+	taskComplete            bool
+	workChan                chan messaging.PathMessage
+	pathChan                chan struct{}
+	messagesSentRequirement int64
 
 	nodePathDict map[string][]string
 	overlayEdges []*messaging.Edge
+	nodeConns    map[string]messaging.PathMessengerClient
 
 	totalCount       int64
 	messagesSent     int64
@@ -45,8 +52,58 @@ func New(serverAddr string) *MessengerServer {
 }
 
 // StartTask starts the messenger's task.
-func (s *MessengerServer) StartTask(context.Context, *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
-	return nil, nil
+func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
+	s.messagesSentRequirement = tr.BatchesToSend * tr.MessagesPerBatch
+	if s.messagesSentRequirement < 0 {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("messages times batches to send must be positive"))
+	}
+
+	go s.doTask()
+
+	return &messaging.TaskConfirmation{}, nil
+}
+
+func (s *MessengerServer) doTask() {
+	// make list of node IDs to randomly select one
+	addrList := make([]string, 0, len(s.nodePathDict))
+	for addr := range s.nodePathDict {
+		addrList = append(addrList, addr)
+	}
+
+	randomGenerator := rand.New(rand.NewSource(time.Now().Unix()))
+
+	for s.messagesSent < s.messagesSentRequirement {
+		// choose random recipient from connection list
+		r := addrList[randomGenerator.Intn(len(addrList))]
+
+		// send to first node on shortest path to dest
+		firstNodeConn := s.nodeConns[s.nodePathDict[r][0]]
+
+		for i := 0; i < s.batchMessages; i++ {
+			// random signed int32 between MinInt32 and MaxInt32
+			p := int32(randomGenerator.Int63n(math.MaxInt32-math.MinInt32) + math.MinInt32)
+
+			// create message with recipient as destination and random payload
+			msg := &messaging.PathMessage{
+				Payload: p,
+				Destination: &messaging.Node{
+					Id: r,
+				},
+				Path: []*messaging.Node{
+					{
+						Id: s.serverAddress,
+					},
+				},
+			}
+
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*1))
+			firstNodeConn.ProcessMessage(ctx, msg)
+
+			s.messagesSent++
+		}
+
+		// do 5x, then repeat
+	}
 }
 
 // PushPaths receives the stream of edges that make up the overlay the node is part of.
@@ -90,11 +147,22 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 
 	paths, err := overlay.GetAllShortestPaths(s.serverAddress, otherNodes, overlayConnections)
 	if err != nil {
-		// TODO: send to registration node
 		log.Fatalf("failed to get shortest paths for node %v: %v", s.serverAddress, err)
 	}
 
 	s.nodePathDict = paths
+
+	// connect to the first node in each path and store connection in dict (used by task goroutine)
+	for addr := range s.nodePathDict {
+		opts := []grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}
+
+		conn, err := grpc.Dial(addr, opts...)
+		if err != nil {
+			log.Fatalf("failed to connect to node %v", addr)
+		}
+		n := messaging.NewPathMessengerClient(conn)
+		s.nodeConns[addr] = n
+	}
 
 	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
 
