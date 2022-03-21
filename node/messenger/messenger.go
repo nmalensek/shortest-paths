@@ -26,6 +26,7 @@ type MessengerServer struct {
 	workChan                chan messaging.PathMessage
 	pathChan                chan struct{}
 	messagesSentRequirement int64
+	batchMessages           int
 
 	nodePathDict map[string][]string
 	overlayEdges []*messaging.Edge
@@ -54,6 +55,8 @@ func New(serverAddr string) *MessengerServer {
 // StartTask starts the messenger's task.
 func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
 	s.messagesSentRequirement = tr.BatchesToSend * tr.MessagesPerBatch
+	s.batchMessages = int(tr.MessagesPerBatch)
+
 	if s.messagesSentRequirement < 0 {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("messages times batches to send must be positive"))
 	}
@@ -96,13 +99,20 @@ func (s *MessengerServer) doTask() {
 				},
 			}
 
-			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*1))
-			firstNodeConn.ProcessMessage(ctx, msg)
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+			_, err := firstNodeConn.ProcessMessage(ctx, msg)
+			cancel()
+
+			if err != nil {
+				sleepTime := 5
+				fmt.Printf("error sending a message to %v, trying again in %v ms: %v", s.nodePathDict[r][0], sleepTime, err)
+				time.Sleep(time.Millisecond * time.Duration(sleepTime))
+				continue
+			}
 
 			s.messagesSent++
+			s.payloadSent += int64(p)
 		}
-
-		// do 5x, then repeat
 	}
 }
 
