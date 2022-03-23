@@ -20,24 +20,25 @@ import (
 // MessengerServer is an instance of a messenger (worker) in an overlay
 type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
-	serverAddress           string
-	mu                      sync.Mutex
-	taskComplete            bool
-	workChan                chan messaging.PathMessage
-	pathChan                chan struct{}
-	messagesSentRequirement int64
-	batchMessages           int
+	serverAddress   string
+	registratonConn messaging.OverlayRegistrationClient
+	mu              sync.Mutex
+	taskComplete    bool
+	workChan        chan messaging.PathMessage
+	pathChan        chan struct{}
 
 	nodePathDict map[string][]string
 	overlayEdges []*messaging.Edge
 	nodeConns    map[string]messaging.PathMessengerClient
 
-	totalCount       int64
-	messagesSent     int64
-	messagesReceived int64
-	messagesRelayed  int64
-	payloadSent      int64
-	payloadReceived  int64
+	messagesSentRequirement int64
+	batchMessages           int
+	totalCount              int64
+	messagesSent            int64
+	messagesReceived        int64
+	messagesRelayed         int64
+	payloadSent             int64
+	payloadReceived         int64
 }
 
 // New returns a new instance of MessengerServer.
@@ -177,7 +178,10 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
 
 	// tell registration node this node's ready
-
+	// _, err := s.registratonConn.MarkReady(ctx, &messaging.Node{ID: s.serverAddress})
+	// if err != nil {
+	// 	log.Fatalf("failed to notify registration node that this node is ready")
+	// }
 }
 
 // ProcessMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
