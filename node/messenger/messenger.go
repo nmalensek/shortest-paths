@@ -190,6 +190,8 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 		log.Fatalf("failed to notify registration node that this node is ready")
 	}
 	defer cancel()
+
+	fmt.Println("Successfully notified registration node that this node is ready")
 }
 
 // AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.

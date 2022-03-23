@@ -31,7 +31,7 @@ type RegistrationServer struct {
 	metadata            map[string]*messaging.MessagingMetadata
 	newRegistrationChan chan struct{}
 
-	nodeStatusChan chan struct{}
+	nodeStatusChan chan string
 	idleNodes      map[string]struct{}
 
 	// Nodes that have registered; used to build the overlay.
@@ -51,7 +51,7 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 		opts:                opts,
 		settings:            conf,
 		newRegistrationChan: make(chan struct{}),
-		nodeStatusChan:      make(chan struct{}),
+		nodeStatusChan:      make(chan string),
 	}
 	go rs.monitorOverlayStatus()
 
@@ -182,6 +182,11 @@ func (s *RegistrationServer) buildAndPushOverlay() []error {
 	return errs
 }
 
+func (s *RegistrationServer) NodeReady(ctx context.Context, n *messaging.Node) (*messaging.TaskReadyResponse, error) {
+	s.nodeStatusChan <- n.Id
+	return &messaging.TaskReadyResponse{}, nil
+}
+
 func (s *RegistrationServer) monitorOverlayStatus() {
 	for {
 		select {
@@ -196,7 +201,7 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 			}
 		case <-s.nodeStatusChan:
 			// new message type: ready/finished
-			// if ready, add to list of idle nodes. if that list == overlay size, start task
+			// if ready, add to list of ready nodes. if that list == overlay size, start task
 			// clear list
 			// if finished, add node to list of idle nodes. if that list == overlay size, request metadata
 		}
