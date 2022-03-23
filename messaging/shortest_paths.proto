@@ -9,7 +9,7 @@ service PathMessenger {
     rpc StartTask(TaskRequest) returns (TaskConfirmation) {}
 
     //Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-    rpc ProcessMessage(PathMessage) returns (PathResponse) {}
+    rpc AcceptMessage(PathMessage) returns (PathResponse) {}
     
     //Transmits metadata about the messages the node has sent and received over the course of the task.
     rpc GetMessagingData(MessagingDataRequest) returns (MessagingMetadata) {}

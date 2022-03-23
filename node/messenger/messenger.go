@@ -12,6 +12,7 @@ import (
 
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/overlay"
+	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,13 +24,16 @@ type MessengerServer struct {
 	serverAddress   string
 	registratonConn messaging.OverlayRegistrationClient
 	mu              sync.Mutex
-	taskComplete    bool
-	workChan        chan messaging.PathMessage
 	pathChan        chan struct{}
 
 	nodePathDict map[string][]string
 	overlayEdges []*messaging.Edge
 	nodeConns    map[string]messaging.PathMessengerClient
+
+	workChan     chan messaging.PathMessage
+	maxWorkers   int
+	sem          *semaphore.Weighted
+	taskComplete bool
 
 	messagesSentRequirement int64
 	batchMessages           int
@@ -101,7 +105,7 @@ func (s *MessengerServer) doTask() {
 			}
 
 			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-			_, err := firstNodeConn.ProcessMessage(ctx, msg)
+			_, err := firstNodeConn.AcceptMessage(ctx, msg)
 			cancel()
 
 			if err != nil {
@@ -175,7 +179,9 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 		s.nodeConns[addr] = n
 	}
 
-	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
+	s.maxWorkers = len(otherNodes)
+	s.workChan = make(chan messaging.PathMessage, len(otherNodes)*5)
+	s.sem = semaphore.NewWeighted(int64(s.maxWorkers))
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -186,8 +192,8 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	defer cancel()
 }
 
-// ProcessMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-func (s *MessengerServer) ProcessMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
+// AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
+func (s *MessengerServer) AcceptMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
 	return nil, nil
 }
 

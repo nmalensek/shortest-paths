@@ -20,7 +20,7 @@ type PathMessengerClient interface {
 	//Starts the PathMessenger nodes' tasks.
 	StartTask(ctx context.Context, in *TaskRequest, opts ...grpc.CallOption) (*TaskConfirmation, error)
 	//Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-	ProcessMessage(ctx context.Context, in *PathMessage, opts ...grpc.CallOption) (*PathResponse, error)
+	AcceptMessage(ctx context.Context, in *PathMessage, opts ...grpc.CallOption) (*PathResponse, error)
 	//Transmits metadata about the messages the node has sent and received over the course of the task.
 	GetMessagingData(ctx context.Context, in *MessagingDataRequest, opts ...grpc.CallOption) (*MessagingMetadata, error)
 	//Sends a stream of Edges that represent the overlay the node is part of.
@@ -44,9 +44,9 @@ func (c *pathMessengerClient) StartTask(ctx context.Context, in *TaskRequest, op
 	return out, nil
 }
 
-func (c *pathMessengerClient) ProcessMessage(ctx context.Context, in *PathMessage, opts ...grpc.CallOption) (*PathResponse, error) {
+func (c *pathMessengerClient) AcceptMessage(ctx context.Context, in *PathMessage, opts ...grpc.CallOption) (*PathResponse, error) {
 	out := new(PathResponse)
-	err := c.cc.Invoke(ctx, "/messaging.PathMessenger/ProcessMessage", in, out, opts...)
+	err := c.cc.Invoke(ctx, "/messaging.PathMessenger/AcceptMessage", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ type PathMessengerServer interface {
 	//Starts the PathMessenger nodes' tasks.
 	StartTask(context.Context, *TaskRequest) (*TaskConfirmation, error)
 	//Either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-	ProcessMessage(context.Context, *PathMessage) (*PathResponse, error)
+	AcceptMessage(context.Context, *PathMessage) (*PathResponse, error)
 	//Transmits metadata about the messages the node has sent and received over the course of the task.
 	GetMessagingData(context.Context, *MessagingDataRequest) (*MessagingMetadata, error)
 	//Sends a stream of Edges that represent the overlay the node is part of.
@@ -118,8 +118,8 @@ type UnimplementedPathMessengerServer struct {
 func (UnimplementedPathMessengerServer) StartTask(context.Context, *TaskRequest) (*TaskConfirmation, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartTask not implemented")
 }
-func (UnimplementedPathMessengerServer) ProcessMessage(context.Context, *PathMessage) (*PathResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method ProcessMessage not implemented")
+func (UnimplementedPathMessengerServer) AcceptMessage(context.Context, *PathMessage) (*PathResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AcceptMessage not implemented")
 }
 func (UnimplementedPathMessengerServer) GetMessagingData(context.Context, *MessagingDataRequest) (*MessagingMetadata, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetMessagingData not implemented")
@@ -158,20 +158,20 @@ func _PathMessenger_StartTask_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
-func _PathMessenger_ProcessMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _PathMessenger_AcceptMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PathMessage)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(PathMessengerServer).ProcessMessage(ctx, in)
+		return srv.(PathMessengerServer).AcceptMessage(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/messaging.PathMessenger/ProcessMessage",
+		FullMethod: "/messaging.PathMessenger/AcceptMessage",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PathMessengerServer).ProcessMessage(ctx, req.(*PathMessage))
+		return srv.(PathMessengerServer).AcceptMessage(ctx, req.(*PathMessage))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -229,8 +229,8 @@ var _PathMessenger_serviceDesc = grpc.ServiceDesc{
 			Handler:    _PathMessenger_StartTask_Handler,
 		},
 		{
-			MethodName: "ProcessMessage",
-			Handler:    _PathMessenger_ProcessMessage_Handler,
+			MethodName: "AcceptMessage",
+			Handler:    _PathMessenger_AcceptMessage_Handler,
 		},
 		{
 			MethodName: "GetMessagingData",
