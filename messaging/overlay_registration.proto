@@ -20,20 +20,17 @@ service OverlayRegistration {
     rpc ProcessMetadata(MessagingMetadata) returns (MetadataConfirmation) {}
 
     //Allows overlay nodes to tell the registration node they're ready for tasks
-    rpc NodeReady(TaskReady) returns (TaskReadyResponse) {}
+    rpc NodeReady(Node) returns (TaskReadyResponse) {}
 
-    rpc NodeFinished(TaskComplete) returns (TaskCompleteResponse) {}
+    //Tells the registration node the sending node finished its tasks
+    rpc NodeFinished(Node) returns (TaskCompleteResponse) {}
 }
 
 message RegistrationResponse {}
 message DeregistrationResponse {}
 
-//TaskReady signifies that the sending node is ready to start its tasks
-message TaskReady{}
 message TaskReadyResponse{}
 
-//TaskComplete tells the registration node the sending node is finished working
-message TaskComplete{}
 message TaskCompleteResponse{}
 
 message MetadataConfirmation {}

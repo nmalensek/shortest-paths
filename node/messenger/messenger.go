@@ -178,10 +178,12 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	// initialize proper number of workers based on overlay size (use a semaphore reading from a work channel)
 
 	// tell registration node this node's ready
-	// _, err := s.registratonConn.MarkReady(ctx, &messaging.Node{ID: s.serverAddress})
-	// if err != nil {
-	// 	log.Fatalf("failed to notify registration node that this node is ready")
-	// }
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+	_, err = s.registratonConn.NodeReady(ctx, &messaging.Node{Id: s.serverAddress})
+	if err != nil {
+		log.Fatalf("failed to notify registration node that this node is ready")
+	}
+	defer cancel()
 }
 
 // ProcessMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
