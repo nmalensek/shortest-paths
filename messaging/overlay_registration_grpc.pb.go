@@ -26,9 +26,9 @@ type OverlayRegistrationClient interface {
 	//Allows overlay nodes to transmit their metadata when it's ready (i.e., when done with a task, etc.)
 	ProcessMetadata(ctx context.Context, in *MessagingMetadata, opts ...grpc.CallOption) (*MetadataConfirmation, error)
 	//Allows overlay nodes to tell the registration node they're ready for tasks
-	NodeReady(ctx context.Context, in *Node, opts ...grpc.CallOption) (*TaskReadyResponse, error)
+	NodeReady(ctx context.Context, in *NodeStatus, opts ...grpc.CallOption) (*TaskReadyResponse, error)
 	//Tells the registration node the sending node finished its tasks
-	NodeFinished(ctx context.Context, in *Node, opts ...grpc.CallOption) (*TaskCompleteResponse, error)
+	NodeFinished(ctx context.Context, in *NodeStatus, opts ...grpc.CallOption) (*TaskCompleteResponse, error)
 }
 
 type overlayRegistrationClient struct {
@@ -98,7 +98,7 @@ func (c *overlayRegistrationClient) ProcessMetadata(ctx context.Context, in *Mes
 	return out, nil
 }
 
-func (c *overlayRegistrationClient) NodeReady(ctx context.Context, in *Node, opts ...grpc.CallOption) (*TaskReadyResponse, error) {
+func (c *overlayRegistrationClient) NodeReady(ctx context.Context, in *NodeStatus, opts ...grpc.CallOption) (*TaskReadyResponse, error) {
 	out := new(TaskReadyResponse)
 	err := c.cc.Invoke(ctx, "/messaging.OverlayRegistration/NodeReady", in, out, opts...)
 	if err != nil {
@@ -107,7 +107,7 @@ func (c *overlayRegistrationClient) NodeReady(ctx context.Context, in *Node, opt
 	return out, nil
 }
 
-func (c *overlayRegistrationClient) NodeFinished(ctx context.Context, in *Node, opts ...grpc.CallOption) (*TaskCompleteResponse, error) {
+func (c *overlayRegistrationClient) NodeFinished(ctx context.Context, in *NodeStatus, opts ...grpc.CallOption) (*TaskCompleteResponse, error) {
 	out := new(TaskCompleteResponse)
 	err := c.cc.Invoke(ctx, "/messaging.OverlayRegistration/NodeFinished", in, out, opts...)
 	if err != nil {
@@ -129,9 +129,9 @@ type OverlayRegistrationServer interface {
 	//Allows overlay nodes to transmit their metadata when it's ready (i.e., when done with a task, etc.)
 	ProcessMetadata(context.Context, *MessagingMetadata) (*MetadataConfirmation, error)
 	//Allows overlay nodes to tell the registration node they're ready for tasks
-	NodeReady(context.Context, *Node) (*TaskReadyResponse, error)
+	NodeReady(context.Context, *NodeStatus) (*TaskReadyResponse, error)
 	//Tells the registration node the sending node finished its tasks
-	NodeFinished(context.Context, *Node) (*TaskCompleteResponse, error)
+	NodeFinished(context.Context, *NodeStatus) (*TaskCompleteResponse, error)
 	mustEmbedUnimplementedOverlayRegistrationServer()
 }
 
@@ -151,10 +151,10 @@ func (UnimplementedOverlayRegistrationServer) GetOverlay(*EdgeRequest, OverlayRe
 func (UnimplementedOverlayRegistrationServer) ProcessMetadata(context.Context, *MessagingMetadata) (*MetadataConfirmation, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessMetadata not implemented")
 }
-func (UnimplementedOverlayRegistrationServer) NodeReady(context.Context, *Node) (*TaskReadyResponse, error) {
+func (UnimplementedOverlayRegistrationServer) NodeReady(context.Context, *NodeStatus) (*TaskReadyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeReady not implemented")
 }
-func (UnimplementedOverlayRegistrationServer) NodeFinished(context.Context, *Node) (*TaskCompleteResponse, error) {
+func (UnimplementedOverlayRegistrationServer) NodeFinished(context.Context, *NodeStatus) (*TaskCompleteResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NodeFinished not implemented")
 }
 func (UnimplementedOverlayRegistrationServer) mustEmbedUnimplementedOverlayRegistrationServer() {}
@@ -246,7 +246,7 @@ func _OverlayRegistration_ProcessMetadata_Handler(srv interface{}, ctx context.C
 }
 
 func _OverlayRegistration_NodeReady_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Node)
+	in := new(NodeStatus)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -258,13 +258,13 @@ func _OverlayRegistration_NodeReady_Handler(srv interface{}, ctx context.Context
 		FullMethod: "/messaging.OverlayRegistration/NodeReady",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OverlayRegistrationServer).NodeReady(ctx, req.(*Node))
+		return srv.(OverlayRegistrationServer).NodeReady(ctx, req.(*NodeStatus))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _OverlayRegistration_NodeFinished_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Node)
+	in := new(NodeStatus)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -276,7 +276,7 @@ func _OverlayRegistration_NodeFinished_Handler(srv interface{}, ctx context.Cont
 		FullMethod: "/messaging.OverlayRegistration/NodeFinished",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(OverlayRegistrationServer).NodeFinished(ctx, req.(*Node))
+		return srv.(OverlayRegistrationServer).NodeFinished(ctx, req.(*NodeStatus))
 	}
 	return interceptor(ctx, in, info, handler)
 }

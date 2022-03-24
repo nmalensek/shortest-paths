@@ -119,6 +119,18 @@ func (s *MessengerServer) doTask() {
 			s.payloadSent += int64(p)
 		}
 	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+	_, err := s.registratonConn.NodeFinished(ctx, &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_COMPLETE})
+	cancel()
+
+	retries := 0
+	for err != nil && retries < 3 {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+		_, err = s.registratonConn.NodeFinished(ctx, &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_COMPLETE})
+		cancel()
+		retries++
+	}
 }
 
 // PushPaths receives the stream of edges that make up the overlay the node is part of.
@@ -185,7 +197,7 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-	_, err = s.registratonConn.NodeReady(ctx, &messaging.Node{Id: s.serverAddress})
+	_, err = s.registratonConn.NodeReady(ctx, &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_READY})
 	if err != nil {
 		log.Fatalf("failed to notify registration node that this node is ready")
 	}

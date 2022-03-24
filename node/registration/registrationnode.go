@@ -31,8 +31,9 @@ type RegistrationServer struct {
 	metadata            map[string]*messaging.MessagingMetadata
 	newRegistrationChan chan struct{}
 
-	nodeStatusChan chan string
+	nodeStatusChan chan *messaging.NodeStatus
 	idleNodes      map[string]struct{}
+	finishedNodes  map[string]struct{}
 
 	// Nodes that have registered; used to build the overlay.
 	registeredNodes map[string]*messaging.Node
@@ -51,7 +52,9 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 		opts:                opts,
 		settings:            conf,
 		newRegistrationChan: make(chan struct{}),
-		nodeStatusChan:      make(chan string),
+		nodeStatusChan:      make(chan *messaging.NodeStatus),
+		idleNodes:           make(map[string]struct{}),
+		finishedNodes:       make(map[string]struct{}),
 	}
 	go rs.monitorOverlayStatus()
 
@@ -182,8 +185,8 @@ func (s *RegistrationServer) buildAndPushOverlay() []error {
 	return errs
 }
 
-func (s *RegistrationServer) NodeReady(ctx context.Context, n *messaging.Node) (*messaging.TaskReadyResponse, error) {
-	s.nodeStatusChan <- n.Id
+func (s *RegistrationServer) NodeReady(ctx context.Context, n *messaging.NodeStatus) (*messaging.TaskReadyResponse, error) {
+	s.nodeStatusChan <- n
 	return &messaging.TaskReadyResponse{}, nil
 }
 
@@ -199,11 +202,21 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 					fmt.Println(e)
 				}
 			}
-		case <-s.nodeStatusChan:
-			// new message type: ready/finished
-			// if ready, add to list of ready nodes. if that list == overlay size, start task
-			// clear list
-			// if finished, add node to list of idle nodes. if that list == overlay size, request metadata
+		case n := <-s.nodeStatusChan:
+			s.mu.Lock()
+			switch {
+			case n.Status == messaging.NodeStatus_READY:
+				s.idleNodes[n.Id] = struct{}{}
+				if len(s.idleNodes) == len(s.registeredNodes) {
+					// tell nodes to start tasks
+				}
+			case n.Status == messaging.NodeStatus_COMPLETE:
+				s.finishedNodes[n.Id] = struct{}{}
+				if len(s.finishedNodes) == len(s.registeredNodes) {
+					// request nodes' metadata
+				}
+			}
+			s.mu.Unlock()
 		}
 
 	}
@@ -212,10 +225,9 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 
 // ProcessMetadata prints out formatted metadata about the most recently completed task.
 func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging.MessagingMetadata) (*messaging.MetadataConfirmation, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
+	s.mu.Lock()
 	s.metadata[mmd.GetSender().Id] = mmd
+	s.mu.Unlock()
 
 	if len(s.metadata) == len(s.registeredNodes) {
 		printMetadata(s.metadata)
