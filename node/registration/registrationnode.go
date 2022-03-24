@@ -39,7 +39,7 @@ type RegistrationServer struct {
 	registeredNodes map[string]*messaging.Node
 
 	// List of connected nodes; used to communicate with those nodes.
-	nodeConnections []messaging.PathMessengerClient
+	nodeConnections map[string]messaging.PathMessengerClient
 
 	overlay []*messaging.Edge
 }
@@ -55,6 +55,7 @@ func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationSe
 		nodeStatusChan:      make(chan *messaging.NodeStatus),
 		idleNodes:           make(map[string]struct{}),
 		finishedNodes:       make(map[string]struct{}),
+		nodeConnections:     make(map[string]messaging.PathMessengerClient),
 	}
 	go rs.monitorOverlayStatus()
 
@@ -92,7 +93,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 			a.IP, a.Port)
 	}
 	pClient := messaging.NewPathMessengerClient(conn)
-	s.nodeConnections = append(s.nodeConnections, pClient)
+	s.nodeConnections[n.Id] = pClient
 
 	fmt.Printf("registered node: %v\n", n.String())
 
@@ -207,8 +208,8 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 			switch {
 			case n.Status == messaging.NodeStatus_READY:
 				s.idleNodes[n.Id] = struct{}{}
-				if len(s.idleNodes) == len(s.registeredNodes) {
-					// tell nodes to start tasks
+				if len(s.idleNodes) == s.settings.Peers {
+					go s.startTasks()
 				}
 			case n.Status == messaging.NodeStatus_COMPLETE:
 				s.finishedNodes[n.Id] = struct{}{}
@@ -220,7 +221,29 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 		}
 
 	}
+}
 
+func (s *RegistrationServer) startTasks() {
+	for k, n := range s.nodeConnections {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+		_, err := n.StartTask(ctx, &messaging.TaskRequest{
+			BatchesToSend:    int64(s.settings.Rounds),
+			MessagesPerBatch: 5,
+		})
+		cancel()
+		retries := 0
+		for err != nil && retries < 3 {
+			time.Sleep(time.Millisecond * 100)
+			_, err = n.StartTask(ctx, &messaging.TaskRequest{
+				BatchesToSend:    int64(s.settings.Rounds),
+				MessagesPerBatch: 5,
+			})
+			retries++
+			if retries == 3 {
+				fmt.Printf("unable to successfully tell node %v to start task processing, skipping...\n", k)
+			}
+		}
+	}
 }
 
 // ProcessMetadata prints out formatted metadata about the most recently completed task.

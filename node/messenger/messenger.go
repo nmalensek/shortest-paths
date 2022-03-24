@@ -126,6 +126,7 @@ func (s *MessengerServer) doTask() {
 
 	retries := 0
 	for err != nil && retries < 3 {
+		time.Sleep(time.Millisecond * 100)
 		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
 		_, err = s.registratonConn.NodeFinished(ctx, &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_COMPLETE})
 		cancel()
