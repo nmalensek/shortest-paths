@@ -30,7 +30,7 @@ type MessengerServer struct {
 	overlayEdges []*messaging.Edge
 	nodeConns    map[string]messaging.PathMessengerClient
 
-	workChan     chan messaging.PathMessage
+	workChan     chan *messaging.PathMessage
 	maxWorkers   int
 	sem          *semaphore.Weighted
 	taskComplete bool
@@ -193,7 +193,7 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	}
 
 	s.maxWorkers = len(otherNodes)
-	s.workChan = make(chan messaging.PathMessage, len(otherNodes)*5)
+	s.workChan = make(chan *messaging.PathMessage, len(otherNodes)*5)
 	s.sem = semaphore.NewWeighted(int64(s.maxWorkers))
 
 	// tell registration node this node's ready
@@ -208,8 +208,9 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 }
 
 // AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
-func (s *MessengerServer) AcceptMessage(context.Context, *messaging.PathMessage) (*messaging.PathResponse, error) {
-	return nil, nil
+func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathMessage) (*messaging.PathResponse, error) {
+	s.workChan <- mp
+	return &messaging.PathResponse{}, nil
 }
 
 // GetMessagingData transmits metadata about the messages the node has sent and received over the course of the task.
