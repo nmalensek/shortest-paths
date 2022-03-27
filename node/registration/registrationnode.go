@@ -214,7 +214,7 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 			case n.Status == messaging.NodeStatus_COMPLETE:
 				s.finishedNodes[n.Id] = struct{}{}
 				if len(s.finishedNodes) == len(s.registeredNodes) {
-					// request nodes' metadata
+					go s.requestMetadata()
 				}
 			}
 			s.mu.Unlock()
@@ -244,6 +244,21 @@ func (s *RegistrationServer) startTasks() {
 			}
 		}
 	}
+}
+
+func (s *RegistrationServer) requestMetadata() {
+	for k := range s.finishedNodes {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+		data, err := s.nodeConnections[k].GetMessagingData(ctx, &messaging.MessagingDataRequest{})
+		if err != nil {
+			fmt.Printf("failed to get metadata from node %v: %v", k, err)
+		}
+		s.metadata[k] = data
+
+		cancel()
+	}
+
+	printMetadata(s.metadata)
 }
 
 // ProcessMetadata prints out formatted metadata about the most recently completed task.
