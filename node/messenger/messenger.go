@@ -35,6 +35,7 @@ type MessengerServer struct {
 	sem          *semaphore.Weighted
 	taskComplete bool
 
+	statsChan               chan recStats
 	messagesSentRequirement int64
 	batchMessages           int
 	totalCount              int64
@@ -43,6 +44,12 @@ type MessengerServer struct {
 	messagesRelayed         int64
 	payloadSent             int64
 	payloadReceived         int64
+}
+
+type recStats struct {
+	messageReceived bool
+	messageRelayed  bool
+	payload         int32
 }
 
 // New returns a new instance of MessengerServer.
@@ -195,6 +202,7 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	s.maxWorkers = len(otherNodes)
 	s.workChan = make(chan *messaging.PathMessage, len(otherNodes)*5)
 	s.sem = semaphore.NewWeighted(int64(s.maxWorkers))
+	go s.processMessages()
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -211,6 +219,61 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathMessage) (*messaging.PathResponse, error) {
 	s.workChan <- mp
 	return &messaging.PathResponse{}, nil
+}
+
+func (s *MessengerServer) processMessages() {
+	for {
+		select {
+		case m := <-s.workChan:
+			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
+				log.Printf("Failed to acquire semaphore: %v", err)
+				break
+			}
+			go func() {
+				defer s.sem.Release(1)
+				if m.Destination != nil {
+					if m.Destination.Id == s.serverAddress {
+						s.statsChan <- recStats{
+							messageReceived: true,
+							payload:         m.Payload,
+						}
+						return
+					}
+
+					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
+					nextNode := s.nodePathDict[m.Destination.Id][0]
+
+					s.statsChan <- recStats{
+						messageRelayed: true,
+					}
+
+					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+					defer cancel()
+
+					_, _ = s.nodeConns[nextNode].AcceptMessage(ctx, m)
+				}
+			}()
+
+		}
+	}
+
+}
+
+func (s *MessengerServer) trackReceivedData() {
+	for {
+		select {
+		case m := <-s.statsChan:
+			if m.messageRelayed {
+				s.messagesRelayed++
+				continue
+			}
+
+			if m.messageReceived {
+				s.messagesReceived++
+				s.payloadReceived += int64(m.payload)
+			}
+		}
+	}
 }
 
 // GetMessagingData transmits metadata about the messages the node has sent and received over the course of the task.
