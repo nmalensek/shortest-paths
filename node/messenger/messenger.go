@@ -253,7 +253,6 @@ func (s *MessengerServer) processMessages() {
 					_, _ = s.nodeConns[nextNode].AcceptMessage(ctx, m)
 				}
 			}()
-
 		}
 	}
 
@@ -263,12 +262,10 @@ func (s *MessengerServer) trackReceivedData() {
 	for {
 		select {
 		case m := <-s.statsChan:
-			if m.messageRelayed {
+			switch {
+			case m.messageRelayed:
 				s.messagesRelayed++
-				continue
-			}
-
-			if m.messageReceived {
+			case m.messageReceived:
 				s.messagesReceived++
 				s.payloadReceived += int64(m.payload)
 			}
