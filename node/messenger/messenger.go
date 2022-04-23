@@ -223,39 +223,38 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 
 func (s *MessengerServer) processMessages() {
 	for {
-		select {
-		case m := <-s.workChan:
-			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
-				log.Printf("Failed to acquire semaphore: %v", err)
-				break
-			}
-			go func() {
-				defer s.sem.Release(1)
-				if m.Destination != nil {
-					if m.Destination.Id == s.serverAddress {
-						s.statsChan <- recStats{
-							messageReceived: true,
-							payload:         m.Payload,
-						}
-						return
-					}
+		m := <-s.workChan
 
-					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
-					nextNode := s.nodePathDict[m.Destination.Id][0]
-
-					s.statsChan <- recStats{
-						messageRelayed: true,
-					}
-
-					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-					defer cancel()
-
-					_, _ = s.nodeConns[nextNode].AcceptMessage(ctx, m)
-				}
-			}()
+		if err := s.sem.Acquire(context.TODO(), 1); err != nil {
+			log.Printf("Failed to acquire semaphore: %v", err)
+			break
 		}
-	}
 
+		go func() {
+			defer s.sem.Release(1)
+			if m.Destination != nil {
+				if m.Destination.Id == s.serverAddress {
+					s.statsChan <- recStats{
+						messageReceived: true,
+						payload:         m.Payload,
+					}
+					return
+				}
+
+				m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
+				nextNode := s.nodePathDict[m.Destination.Id][0]
+
+				s.statsChan <- recStats{
+					messageRelayed: true,
+				}
+
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+				defer cancel()
+
+				_, _ = s.nodeConns[nextNode].AcceptMessage(ctx, m)
+			}
+		}()
+	}
 }
 
 func (s *MessengerServer) trackReceivedData() {
