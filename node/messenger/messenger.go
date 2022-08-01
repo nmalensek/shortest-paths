@@ -58,8 +58,10 @@ func New(serverAddr string) *MessengerServer {
 		serverAddress: serverAddr,
 		nodePathDict:  make(map[string][]string),
 		pathChan:      make(chan struct{}),
+		statsChan:     make(chan recStats),
 	}
 	go ms.calculatePathsWhenReady()
+	go ms.trackReceivedData()
 
 	return ms
 }
@@ -251,7 +253,10 @@ func (s *MessengerServer) processMessages() {
 				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
 				defer cancel()
 
-				_, _ = s.nodeConns[nextNode].AcceptMessage(ctx, m)
+				_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
+				if err != nil {
+					fmt.Printf("error relaying message %v: %v\n", m, err)
+				}
 			}
 		}()
 	}
@@ -259,15 +264,13 @@ func (s *MessengerServer) processMessages() {
 
 func (s *MessengerServer) trackReceivedData() {
 	for {
-		select {
-		case m := <-s.statsChan:
-			switch {
-			case m.messageRelayed:
-				s.messagesRelayed++
-			case m.messageReceived:
-				s.messagesReceived++
-				s.payloadReceived += int64(m.payload)
-			}
+		m := <-s.statsChan
+		switch {
+		case m.messageRelayed:
+			s.messagesRelayed++
+		case m.messageReceived:
+			s.messagesReceived++
+			s.payloadReceived += int64(m.payload)
 		}
 	}
 }
