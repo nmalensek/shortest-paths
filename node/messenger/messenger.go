@@ -18,6 +18,12 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+// Config contains all the configuration needed to register the messenger with the registration node
+type Config struct {
+	RegistrationIP   string `json:"registrationIP"`
+	RegistrationPort int    `json:"registrationPort"`
+}
+
 // MessengerServer is an instance of a messenger (worker) in an overlay
 type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer

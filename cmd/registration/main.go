@@ -19,28 +19,6 @@ var (
 	configPath = flag.String("config", "", "the absolute path to the registration node config file in JSON format")
 )
 
-func setConfig() registration.Config {
-	flag.Parse()
-
-	file, err := os.Open(*configPath)
-	if err != nil {
-		log.Fatalf("could not open config file: %v", err)
-	}
-
-	fileBytes, err := io.ReadAll(file)
-	if err != nil {
-		log.Fatalf("could not read config file: %v", err)
-	}
-
-	var conf registration.Config
-	json.Unmarshal(fileBytes, &conf)
-	if err != nil {
-		log.Fatalf("could not unmarshal config file: %v", err)
-	}
-
-	return conf
-}
-
 func main() {
 	conf := setConfig()
 
@@ -61,4 +39,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func setConfig() registration.Config {
+	flag.Parse()
+
+	file, err := os.Open(*configPath)
+	if err != nil {
+		log.Fatalf("could not open config file: %v", err)
+	}
+
+	fileBytes, err := io.ReadAll(file)
+	if err != nil {
+		log.Fatalf("could not read config file: %v", err)
+	}
+
+	var conf registration.Config
+	json.Unmarshal(fileBytes, &conf)
+	if err != nil {
+		log.Fatalf("could not unmarshal config file: %v", err)
+	}
+
+	return conf
 }
