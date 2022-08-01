@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
-	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
@@ -18,7 +17,7 @@ func TestRegister(t *testing.T) {
 
 	m := NewMockdialer(ctrl)
 	opts := []grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}
-	s := New(opts, config.RegistrationServer{})
+	s := New(opts, Config{})
 	s.dial = m.DialFunc
 
 	m.EXPECT().DialFunc(gomock.Any(), gomock.Any()).Return(&grpc.ClientConn{}, nil)
@@ -97,7 +96,7 @@ func TestRegistrationServer_DeregisterNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			opts := []grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}
-			s := New(opts, config.RegistrationServer{})
+			s := New(opts, Config{})
 			s.registeredNodes = tt.nodes
 			s.overlaySent = tt.overlaySent
 

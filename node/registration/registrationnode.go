@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nmalensek/shortest-paths/config"
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/overlay"
 	"google.golang.org/grpc"
@@ -20,11 +19,26 @@ type dialer interface {
 	DialFunc(target string, opts ...grpc.DialOption) (*grpc.ClientConn, error)
 }
 
+// Config contains all the config variables to run a registration node
+type Config struct {
+	// The server port
+	Port int `json:"port"`
+
+	// The number of 5-message batches every other node in the overlay needs to send
+	Rounds int `json:"rounds"`
+
+	// The number of nodes every other node must be connected to
+	Connections int `json:"connections"`
+
+	// The total number of nodes that need to be present in the overlay before starting the task
+	Peers int `json:"peers"`
+}
+
 // RegistrationServer contains everything needed to orchestrate overlay nodes' task(s).
 type RegistrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
 	mu                  sync.RWMutex
-	settings            config.RegistrationServer
+	settings            Config
 	overlaySent         bool
 	opts                []grpc.DialOption
 	dial                func(string, ...grpc.DialOption) (*grpc.ClientConn, error)
@@ -45,7 +59,7 @@ type RegistrationServer struct {
 }
 
 // New provides a new instance of RegistrationServer.
-func New(opts []grpc.DialOption, conf config.RegistrationServer) *RegistrationServer {
+func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 	rs := &RegistrationServer{
 		registeredNodes:     make(map[string]*messaging.Node),
 		dial:                grpc.Dial,
