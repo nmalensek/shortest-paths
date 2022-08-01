@@ -43,7 +43,7 @@ type MessengerServer struct {
 
 	statsChan               chan recStats
 	messagesSentRequirement int64
-	batchMessages           int
+	batchMessages           int64
 	totalCount              int64
 	messagesSent            int64
 	messagesReceived        int64
@@ -75,7 +75,7 @@ func New(serverAddr string) *MessengerServer {
 // StartTask starts the messenger's task.
 func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
 	s.messagesSentRequirement = tr.BatchesToSend * tr.MessagesPerBatch
-	s.batchMessages = int(tr.MessagesPerBatch)
+	s.batchMessages = tr.MessagesPerBatch
 
 	if s.messagesSentRequirement < 0 {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("messages times batches to send must be positive"))
@@ -102,7 +102,7 @@ func (s *MessengerServer) doTask() {
 		// send to first node on shortest path to dest
 		firstNodeConn := s.nodeConns[s.nodePathDict[r][0]]
 
-		for i := 0; i < s.batchMessages; i++ {
+		for i := int64(0); i < s.batchMessages; i++ {
 			// random signed int32 between MinInt32 and MaxInt32
 			p := int32(randomGenerator.Int63n(math.MaxInt32-math.MinInt32) + math.MinInt32)
 
