@@ -98,6 +98,8 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 			sendTwo := 20
 			payloadTwo := 200000
 
+			relayCount := 5
+
 			wg := sync.WaitGroup{}
 			wg.Add(2)
 
@@ -118,6 +120,11 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 						payload:         int32(payloadTwo),
 					}
 				}
+				for j := 0; j < relayCount; j++ {
+					s.statsChan <- recStats{
+						messageRelayed: true,
+					}
+				}
 				wg.Done()
 			}()
 
@@ -127,12 +134,21 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 
 			s.shutdownChan <- struct{}{}
 
-			if s.messagesReceived != (int64(sendOne) + int64(sendTwo)) {
-				t.Fatalf("unexpected number of messages received, got %v want %v", s.messagesReceived, (sendOne + sendTwo))
+			stats, err := s.GetMessagingData(context.Background(), &messaging.MessagingDataRequest{})
+			if err != nil {
+				t.Fatal("error getting stats")
 			}
 
-			if s.payloadReceived != int64((sendOne*payloadOne)+(sendTwo*payloadTwo)) {
-				t.Fatalf("unexpected payload amount received, got %v want %v", s.payloadReceived, ((sendOne * payloadOne) + (sendTwo * payloadTwo)))
+			if stats.MessagesReceived != (int64(sendOne) + int64(sendTwo)) {
+				t.Fatalf("unexpected number of messages received, got %v want %v", stats.MessagesReceived, (sendOne + sendTwo))
+			}
+
+			if stats.PayloadReceived != int64((sendOne*payloadOne)+(sendTwo*payloadTwo)) {
+				t.Fatalf("unexpected payload amount received, got %v want %v", stats.PayloadReceived, ((sendOne * payloadOne) + (sendTwo * payloadTwo)))
+			}
+
+			if stats.MessagesRelayed != int64(relayCount) {
+				t.Fatalf("unexpected 'relayed' amount received, got %v want %v", stats.MessagesRelayed, relayCount)
 			}
 		})
 	}
