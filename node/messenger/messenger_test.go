@@ -3,6 +3,7 @@ package messenger
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -71,6 +72,67 @@ func TestMessengerServer_StartTask(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("MessengerServer.StartTask() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMessengerServer_trackReceivedData(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "calculate stats correctly",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &MessengerServer{
+				statsChan:    make(chan recStats),
+				shutdownChan: make(chan struct{}),
+			}
+
+			sendOne := 10
+			payloadOne := 100000
+
+			sendTwo := 20
+			payloadTwo := 200000
+
+			wg := sync.WaitGroup{}
+			wg.Add(2)
+
+			go func() {
+				for i := 0; i < sendOne; i++ {
+					s.statsChan <- recStats{
+						messageReceived: true,
+						payload:         int32(payloadOne),
+					}
+				}
+				wg.Done()
+			}()
+
+			go func() {
+				for i := 0; i < sendTwo; i++ {
+					s.statsChan <- recStats{
+						messageReceived: true,
+						payload:         int32(payloadTwo),
+					}
+				}
+				wg.Done()
+			}()
+
+			go s.trackReceivedData(s.statsChan, s.shutdownChan)
+
+			wg.Wait()
+
+			s.shutdownChan <- struct{}{}
+
+			if s.messagesReceived != (int64(sendOne) + int64(sendTwo)) {
+				t.Fatalf("unexpected number of messages received, got %v want %v", s.messagesReceived, (sendOne + sendTwo))
+			}
+
+			if s.payloadReceived != int64((sendOne*payloadOne)+(sendTwo*payloadTwo)) {
+				t.Fatalf("unexpected payload amount received, got %v want %v", s.payloadReceived, ((sendOne * payloadOne) + (sendTwo * payloadTwo)))
 			}
 		})
 	}

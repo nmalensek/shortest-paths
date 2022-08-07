@@ -51,6 +51,8 @@ type MessengerServer struct {
 	messagesRelayed         int64
 	payloadSent             int64
 	payloadReceived         int64
+
+	shutdownChan chan struct{}
 }
 
 type recStats struct {
@@ -67,10 +69,11 @@ func New(serverAddr string) *MessengerServer {
 		pathChan:      make(chan struct{}),
 		startTaskChan: make(chan struct{}),
 		statsChan:     make(chan recStats),
+		shutdownChan:  make(chan struct{}),
 	}
 	go ms.calculatePathsWhenReady(ms.pathChan)
 	go ms.doTask(ms.startTaskChan)
-	go ms.trackReceivedData(ms.statsChan)
+	go ms.trackReceivedData(ms.statsChan, ms.shutdownChan)
 
 	return ms
 }
@@ -216,7 +219,7 @@ func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
 	s.maxWorkers = len(otherNodes)
 	s.workChan = make(chan *messaging.PathMessage, len(otherNodes)*5)
 	s.sem = semaphore.NewWeighted(int64(s.maxWorkers))
-	go s.processMessages()
+	go s.processMessages(s.workChan, s.shutdownChan)
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -235,54 +238,62 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 	return &messaging.PathResponse{}, nil
 }
 
-func (s *MessengerServer) processMessages() {
+func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, quitChan chan struct{}) {
 	for {
-		m := <-s.workChan
+		select {
+		case m := <-s.workChan:
+			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
+				log.Printf("Failed to acquire semaphore: %v", err)
+				break
+			}
 
-		if err := s.sem.Acquire(context.TODO(), 1); err != nil {
-			log.Printf("Failed to acquire semaphore: %v", err)
+			go func() {
+				defer s.sem.Release(1)
+				if m.Destination != nil {
+					if m.Destination.Id == s.serverAddress {
+						s.statsChan <- recStats{
+							messageReceived: true,
+							payload:         m.Payload,
+						}
+						return
+					}
+
+					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
+					nextNode := s.nodePathDict[m.Destination.Id][0]
+
+					s.statsChan <- recStats{
+						messageRelayed: true,
+					}
+
+					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+					defer cancel()
+
+					_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
+					if err != nil {
+						fmt.Printf("error relaying message %v: %v\n", m, err)
+					}
+				}
+			}()
+		case <-quitChan:
 			break
 		}
 
-		go func() {
-			defer s.sem.Release(1)
-			if m.Destination != nil {
-				if m.Destination.Id == s.serverAddress {
-					s.statsChan <- recStats{
-						messageReceived: true,
-						payload:         m.Payload,
-					}
-					return
-				}
-
-				m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
-				nextNode := s.nodePathDict[m.Destination.Id][0]
-
-				s.statsChan <- recStats{
-					messageRelayed: true,
-				}
-
-				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-				defer cancel()
-
-				_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
-				if err != nil {
-					fmt.Printf("error relaying message %v: %v\n", m, err)
-				}
-			}
-		}()
 	}
 }
 
-func (s *MessengerServer) trackReceivedData(sChan chan recStats) {
+func (s *MessengerServer) trackReceivedData(sChan chan recStats, quit chan struct{}) {
 	for {
-		m := <-sChan
-		switch {
-		case m.messageRelayed:
-			s.messagesRelayed++
-		case m.messageReceived:
-			s.messagesReceived++
-			s.payloadReceived += int64(m.payload)
+		select {
+		case m := <-sChan:
+			switch {
+			case m.messageRelayed:
+				s.messagesRelayed++
+			case m.messageReceived:
+				s.messagesReceived++
+				s.payloadReceived += int64(m.payload)
+			}
+		case <-quit:
+			break
 		}
 	}
 }
@@ -300,6 +311,9 @@ func (s *MessengerServer) GetMessagingData(context.Context, *messaging.Messaging
 		PayloadReceived:  s.payloadReceived,
 	}
 	s.mu.Unlock()
+
+	// if the registration node is asking for stats everyone's done, shutdown extra processes.
+	s.shutdownChan <- struct{}{}
 
 	return data, nil
 }
