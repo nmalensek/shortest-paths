@@ -29,6 +29,7 @@ type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
 	serverAddress   string
 	registratonConn messaging.OverlayRegistrationClient
+	startTaskChan   chan struct{}
 	mu              sync.Mutex
 	pathChan        chan struct{}
 
@@ -64,10 +65,12 @@ func New(serverAddr string) *MessengerServer {
 		serverAddress: serverAddr,
 		nodePathDict:  make(map[string][]string),
 		pathChan:      make(chan struct{}),
+		startTaskChan: make(chan struct{}),
 		statsChan:     make(chan recStats),
 	}
-	go ms.calculatePathsWhenReady()
-	go ms.trackReceivedData()
+	go ms.calculatePathsWhenReady(ms.pathChan)
+	go ms.doTask(ms.startTaskChan)
+	go ms.trackReceivedData(ms.statsChan)
 
 	return ms
 }
@@ -81,12 +84,14 @@ func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskReque
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf("messages times batches to send must be positive"))
 	}
 
-	go s.doTask()
+	s.startTaskChan <- struct{}{}
 
 	return &messaging.TaskConfirmation{}, nil
 }
 
-func (s *MessengerServer) doTask() {
+func (s *MessengerServer) doTask(c chan struct{}) {
+	<-c
+
 	// make list of node IDs to randomly select one
 	addrList := make([]string, 0, len(s.nodePathDict))
 	for addr := range s.nodePathDict {
@@ -169,8 +174,9 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 	}
 }
 
-func (s *MessengerServer) calculatePathsWhenReady() {
-	<-s.pathChan
+func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
+	<-waitChan
+
 	// map of each node to edges it's part of.
 	overlayConnections := make(map[string][]*messaging.Edge)
 	// keep track of all other nodes as nodes this one should connect to.
@@ -268,9 +274,9 @@ func (s *MessengerServer) processMessages() {
 	}
 }
 
-func (s *MessengerServer) trackReceivedData() {
+func (s *MessengerServer) trackReceivedData(sChan chan recStats) {
 	for {
-		m := <-s.statsChan
+		m := <-sChan
 		switch {
 		case m.messageRelayed:
 			s.messagesRelayed++

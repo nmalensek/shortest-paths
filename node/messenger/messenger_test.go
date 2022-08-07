@@ -3,11 +3,10 @@ package messenger
 import (
 	"context"
 	"reflect"
-	"sync"
 	"testing"
 
+	"github.com/golang/mock/gomock"
 	"github.com/nmalensek/shortest-paths/messaging"
-	"google.golang.org/grpc"
 )
 
 func TestMessengerServer_StartTask(t *testing.T) {
@@ -53,17 +52,17 @@ func TestMessengerServer_StartTask(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockRegClient := TestMockOverlayRegistrationClient{
-				WaitGroup: &sync.WaitGroup{},
-			}
+			mockRegClient := messaging.NewMockOverlayRegistrationClient(gomock.NewController(t))
 			s := &MessengerServer{
 				serverAddress:   "mockMessenger",
 				registratonConn: mockRegClient,
+				startTaskChan:   make(chan struct{}),
 			}
 
-			if !tt.wantErr {
-				mockRegClient.WaitGroup.Add(1)
-			}
+			// simulate receiving from the channel
+			go func() {
+				<-s.startTaskChan
+			}()
 
 			got, err := s.StartTask(context.Background(), tt.args.tr)
 			if (err != nil) != tt.wantErr {
@@ -75,35 +74,4 @@ func TestMessengerServer_StartTask(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestMockOverlayRegistrationClient mocks OverlayRegistrationClient because the messenger calls doTask() -> NodeFinished() in a goroutine;
-// this type allows us to use a WaitGroup to wait until that goroutine is done so the test correctly passes/fails without any race conditions.
-type TestMockOverlayRegistrationClient struct {
-	WaitGroup *sync.WaitGroup
-}
-
-func (t TestMockOverlayRegistrationClient) RegisterNode(ctx context.Context, in *messaging.Node, opts ...grpc.CallOption) (*messaging.RegistrationResponse, error) {
-	return &messaging.RegistrationResponse{}, nil
-}
-
-func (t TestMockOverlayRegistrationClient) DeregisterNode(ctx context.Context, in *messaging.Node, opts ...grpc.CallOption) (*messaging.DeregistrationResponse, error) {
-	return &messaging.DeregistrationResponse{}, nil
-}
-
-func (t TestMockOverlayRegistrationClient) GetOverlay(ctx context.Context, in *messaging.EdgeRequest, opts ...grpc.CallOption) (messaging.OverlayRegistration_GetOverlayClient, error) {
-	return nil, nil
-}
-
-func (t TestMockOverlayRegistrationClient) ProcessMetadata(ctx context.Context, in *messaging.MessagingMetadata, opts ...grpc.CallOption) (*messaging.MetadataConfirmation, error) {
-	return &messaging.MetadataConfirmation{}, nil
-}
-
-func (t TestMockOverlayRegistrationClient) NodeReady(ctx context.Context, in *messaging.NodeStatus, opts ...grpc.CallOption) (*messaging.TaskReadyResponse, error) {
-	return &messaging.TaskReadyResponse{}, nil
-}
-
-func (t TestMockOverlayRegistrationClient) NodeFinished(ctx context.Context, in *messaging.NodeStatus, opts ...grpc.CallOption) (*messaging.TaskCompleteResponse, error) {
-	t.WaitGroup.Done()
-	return &messaging.TaskCompleteResponse{}, nil
 }
