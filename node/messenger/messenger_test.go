@@ -2,12 +2,14 @@ package messenger
 
 import (
 	"context"
+	"io"
 	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/golang/mock/gomock"
 	"github.com/nmalensek/shortest-paths/messaging"
+	"google.golang.org/grpc"
 )
 
 func TestMessengerServer_StartTask(t *testing.T) {
@@ -82,7 +84,7 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 		name string
 	}{
 		{
-			name: "calculate stats correctly",
+			name: "calculate stats correctly with concurrent modification",
 		},
 	}
 	for _, tt := range tests {
@@ -152,4 +154,120 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMessengerServer_PushPaths(t *testing.T) {
+	type args struct {
+		stream messaging.PathMessenger_PushPathsServer
+	}
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name: "process paths correctly",
+		},
+		{
+			name:    "bail out on context canceled",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &MessengerServer{
+				pathChan:     make(chan struct{}),
+				overlayEdges: make([]*messaging.Edge, 0, 1),
+			}
+			tpss := newTestPathStreamServer()
+
+			if tt.wantErr {
+				tpss.Cancel()
+			} else {
+				go func() {
+					<-s.pathChan
+				}()
+			}
+
+			if err := s.PushPaths(tpss); (err != nil) != tt.wantErr {
+				t.Errorf("MessengerServer.PushPaths() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+type testPathsStreamServer struct {
+	grpc.ServerStream
+	ctx        context.Context
+	cancelFunc context.CancelFunc
+	clientRecv chan *messaging.Edge
+	index      int
+	mockData   []*messaging.Edge
+}
+
+func newTestPathStreamServer() *testPathsStreamServer {
+	cancelContext, cancel := context.WithCancel(context.Background())
+	return &testPathsStreamServer{
+		ctx:        cancelContext,
+		cancelFunc: cancel,
+		clientRecv: make(chan *messaging.Edge),
+		mockData: []*messaging.Edge{
+			{
+				Source: &messaging.Node{
+					Id: "abc123",
+				},
+				Destination: &messaging.Node{
+					Id: "def456",
+				},
+				Weight: 1,
+			},
+			{
+				Source: &messaging.Node{
+					Id: "def456",
+				},
+				Destination: &messaging.Node{
+					Id: "ghi789",
+				},
+				Weight: 1,
+			},
+			{
+				Source: &messaging.Node{
+					Id: "ghi789",
+				},
+				Destination: &messaging.Node{
+					Id: "jkl012",
+				},
+				Weight: 1,
+			},
+			{
+				Source: &messaging.Node{
+					Id: "jkl012",
+				},
+				Destination: &messaging.Node{
+					Id: "def456",
+				},
+				Weight: 1,
+			},
+		},
+	}
+}
+
+func (s *testPathsStreamServer) Recv() (*messaging.Edge, error) {
+	if s.index < len(s.mockData) {
+		d := s.mockData[s.index]
+		s.index++
+		return d, nil
+	}
+	return nil, io.EOF
+}
+
+func (s *testPathsStreamServer) SendAndClose(*messaging.ConnectionResponse) error {
+	return nil
+}
+
+func (s *testPathsStreamServer) Context() context.Context {
+	return s.ctx
+}
+
+func (s *testPathsStreamServer) Cancel() {
+	s.cancelFunc()
 }

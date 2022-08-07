@@ -66,6 +66,7 @@ func New(serverAddr string) *MessengerServer {
 	ms := &MessengerServer{
 		serverAddress: serverAddr,
 		nodePathDict:  make(map[string][]string),
+		overlayEdges:  make([]*messaging.Edge, 0, 1),
 		pathChan:      make(chan struct{}),
 		startTaskChan: make(chan struct{}),
 		statsChan:     make(chan recStats),
