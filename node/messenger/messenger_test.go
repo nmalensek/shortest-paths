@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/nmalensek/shortest-paths/messaging"
@@ -168,7 +169,7 @@ func TestMessengerServer_PushPaths(t *testing.T) {
 			name: "process paths correctly",
 		},
 		{
-			name:    "bail out on context canceled",
+			name:    "abort on context canceled",
 			wantErr: true,
 		},
 	}
@@ -270,4 +271,101 @@ func (s *testPathsStreamServer) Context() context.Context {
 
 func (s *testPathsStreamServer) Cancel() {
 	s.cancelFunc()
+}
+
+func TestMessengerServer_processMessages(t *testing.T) {
+	tests := []struct {
+		name          string
+		numWorkers    int
+		payloadAmount int32
+		numMessages   int
+		wantPayload   int64
+		wantReceived  int64
+		wantRelayed   int64
+	}{
+		{
+			name:          "only process sink messages when path to relay node is unknown",
+			numWorkers:    10,
+			payloadAmount: 1000,
+			numMessages:   20,
+			wantPayload:   1000 * 10,
+			wantReceived:  10,
+			wantRelayed:   0,
+		},
+		// {
+		// 	name:          "handle relay and sink messages correctly",
+		// 	numWorkers:    10,
+		// 	payloadAmount: 1000,
+		// 	numMessages:   200,
+		// },
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &MessengerServer{
+				serverAddress: "127.0.0.1:8000",
+				shutdownChan:  make(chan struct{}),
+				statsChan:     make(chan recStats),
+			}
+
+			s.setWorkValues(tt.numWorkers)
+			go s.trackReceivedData(s.statsChan, s.shutdownChan)
+
+			testStart := time.Now()
+
+			mockOtherNode := messaging.NewMockPathMessengerClient(gomock.NewController(t))
+
+			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
+
+			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
+
+			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
+
+			go func() {
+				for s.messagesReceived+s.messagesRelayed < tt.wantReceived+tt.wantRelayed {
+					// force shutdown after a max of 5 seconds
+					if time.Since(testStart).Seconds() >= 5 {
+						close(s.shutdownChan)
+						return
+					}
+					time.Sleep(time.Millisecond * 50)
+				}
+				close(s.shutdownChan)
+			}()
+
+			s.processMessages(s.workChan, s.shutdownChan)
+		})
+	}
+}
+
+func messageTargetNode(targetSink string, targetRelayAddress string, targetRelayNode *messaging.MockPathMessengerClient,
+	targetChan chan *messaging.PathMessage, numMessages int, payloadAmount int32) {
+
+	for i := 0; i < numMessages; i++ {
+		if i%2 == 0 {
+			targetChan <- &messaging.PathMessage{
+				Payload: payloadAmount,
+				Destination: &messaging.Node{
+					Id: targetSink,
+				},
+				Path: []*messaging.Node{},
+			}
+		} else {
+			// targetRelayNode.EXPECT().AcceptMessage(gomock.Any(), &messaging.PathMessage{
+			// 	Payload: payloadAmount,
+			// 	Destination: &messaging.Node{
+			// 		Id: targetRelayAddress,
+			// 	},
+			// 	Path: []*messaging.Node{{Id: targetSink}},
+			// }).Return(&messaging.PathResponse{}, nil)
+
+			targetChan <- &messaging.PathMessage{
+				Payload: payloadAmount,
+				Destination: &messaging.Node{
+					Id: targetRelayAddress,
+				},
+				Path: []*messaging.Node{},
+			}
+		}
+	}
 }

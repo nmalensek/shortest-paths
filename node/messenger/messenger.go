@@ -79,6 +79,12 @@ func New(serverAddr string) *MessengerServer {
 	return ms
 }
 
+func (s *MessengerServer) setWorkValues(maxWorkers int) {
+	s.maxWorkers = maxWorkers
+	s.workChan = make(chan *messaging.PathMessage, maxWorkers*5)
+	s.sem = semaphore.NewWeighted(int64(maxWorkers))
+}
+
 // StartTask starts the messenger's task.
 func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskRequest) (*messaging.TaskConfirmation, error) {
 	s.messagesSentRequirement = tr.BatchesToSend * tr.MessagesPerBatch
@@ -217,9 +223,7 @@ func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
 		s.nodeConns[addr] = n
 	}
 
-	s.maxWorkers = len(otherNodes)
-	s.workChan = make(chan *messaging.PathMessage, len(otherNodes)*5)
-	s.sem = semaphore.NewWeighted(int64(s.maxWorkers))
+	s.setWorkValues(len(otherNodes))
 	go s.processMessages(s.workChan, s.shutdownChan)
 
 	// tell registration node this node's ready
@@ -242,7 +246,7 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, quitChan chan struct{}) {
 	for {
 		select {
-		case m := <-s.workChan:
+		case m := <-workChan:
 			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
 				log.Printf("Failed to acquire semaphore: %v", err)
 				break
@@ -260,6 +264,12 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 					}
 
 					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
+					if len(s.nodePathDict[m.Destination.Id]) < 1 {
+						// TODO turn into an error message when logging's added
+						fmt.Printf("no path to %v, discarding message\n", m.Destination.Id)
+						return
+					}
+
 					nextNode := s.nodePathDict[m.Destination.Id][0]
 
 					s.statsChan <- recStats{
@@ -276,7 +286,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 				}
 			}()
 		case <-quitChan:
-			break
+			return
 		}
 
 	}
@@ -294,7 +304,7 @@ func (s *MessengerServer) trackReceivedData(sChan chan recStats, quit chan struc
 				s.payloadReceived += int64(m.payload)
 			}
 		case <-quit:
-			break
+			return
 		}
 	}
 }
@@ -313,8 +323,8 @@ func (s *MessengerServer) GetMessagingData(context.Context, *messaging.Messaging
 	}
 	s.mu.Unlock()
 
-	// if the registration node is asking for stats everyone's done, shutdown extra processes.
-	s.shutdownChan <- struct{}{}
+	// if the registration node is asking for stats then the task's done, shutdown extra processes.
+	close(s.shutdownChan)
 
 	return data, nil
 }
