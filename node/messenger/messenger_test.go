@@ -333,7 +333,7 @@ func TestMessengerServer_processMessages(t *testing.T) {
 				close(s.shutdownChan)
 			}()
 
-			s.processMessages(s.workChan, s.shutdownChan)
+			s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
 		})
 	}
 }

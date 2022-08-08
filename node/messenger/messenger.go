@@ -224,7 +224,7 @@ func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
 	}
 
 	s.setWorkValues(len(otherNodes))
-	go s.processMessages(s.workChan, s.shutdownChan)
+	go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -243,7 +243,11 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 	return &messaging.PathResponse{}, nil
 }
 
-func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, quitChan chan struct{}) {
+func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, statsChan chan recStats, quitChan chan struct{}) {
+	if workChan == nil || quitChan == nil || statsChan == nil {
+		log.Fatal("all work channels must be non-nil")
+		return
+	}
 	for {
 		select {
 		case m := <-workChan:
@@ -256,7 +260,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 				defer s.sem.Release(1)
 				if m.Destination != nil {
 					if m.Destination.Id == s.serverAddress {
-						s.statsChan <- recStats{
+						statsChan <- recStats{
 							messageReceived: true,
 							payload:         m.Payload,
 						}
@@ -272,7 +276,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 
 					nextNode := s.nodePathDict[m.Destination.Id][0]
 
-					s.statsChan <- recStats{
+					statsChan <- recStats{
 						messageRelayed: true,
 					}
 
