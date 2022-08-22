@@ -512,36 +512,56 @@ func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
 	}
 }
 
-// func TestMessengerServer_doTask(t *testing.T) {
-// 	tests := []struct {
-// 		name       string
-// 		otherNodes map[string][]string
-// 	}{
-// 		{
-// 			name: "send messages to another node successfully",
-// 			otherNodes: map[string][]string{
-// 				"127.0.0.1:9999": {"127.0.0.1:8888"},
-// 			},
-// 		},
-// 	}
-// 	for _, tt := range tests {
-// 		t.Run(tt.name, func(t *testing.T) {
-// 			s := &MessengerServer{
-// 				nodePathDict: tt.otherNodes,
-// 			}
-// 			c := make(chan struct{})
+func TestMessengerServer_doTask(t *testing.T) {
+	tests := []struct {
+		name        string
+		otherNodes  map[string][]string
+		numMessages int64
+	}{
+		{
+			name: "send messages to another node successfully",
+			otherNodes: map[string][]string{
+				"127.0.0.1:9999": {"127.0.0.1:8888"},
+			},
+			numMessages: 1000,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			mockRecipient := messaging.NewMockPathMessengerClient(ctrl)
+			mockRegistrationClient := messaging.NewMockOverlayRegistrationClient(ctrl)
+			s := &MessengerServer{
+				nodePathDict: tt.otherNodes,
+				nodeConns: map[string]messaging.PathMessengerClient{
+					"127.0.0.1:8888": mockRecipient,
+				},
+				messagesSentRequirement: tt.numMessages,
+				batchMessages:           5,
+				registratonConn:         mockRegistrationClient,
+			}
+			c := make(chan struct{})
+			mockRegistrationClient.EXPECT().NodeFinished(gomock.Any(), &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_COMPLETE})
 
-// 			wg := &sync.WaitGroup{}
-// 			wg.Add(1)
+			for i := 0; i < int(tt.numMessages); i++ {
+				mockRecipient.EXPECT().AcceptMessage(gomock.Any(), gomock.Any()).Return(&messaging.PathResponse{}, nil)
+			}
 
-// 			go func() {
-// 				s.doTask(c)
-// 				wg.Done()
-// 			}()
+			wg := &sync.WaitGroup{}
+			wg.Add(1)
 
-// 			wg.Wait()
+			go func() {
+				s.doTask(c)
+				wg.Done()
+			}()
 
-// 			// check sent payload and message count
-// 		})
-// 	}
-// }
+			c <- struct{}{}
+
+			wg.Wait()
+
+			if s.messagesSent != tt.numMessages {
+				t.Fatalf("sent unexpected number of messages, got %v want %v", s.messagesSent, tt.numMessages)
+			}
+		})
+	}
+}

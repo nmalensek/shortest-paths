@@ -106,6 +106,10 @@ func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskReque
 }
 
 func (s *MessengerServer) doTask(c chan struct{}) {
+	if s.batchMessages <= 0 {
+		log.Fatal("MessengerServer cannot do task, batchMessages is less than zero")
+		return
+	}
 	<-c
 
 	// make list of node IDs to randomly select one
