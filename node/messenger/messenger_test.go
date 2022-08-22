@@ -2,6 +2,7 @@ package messenger
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"reflect"
 	"sync"
@@ -109,8 +110,8 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 			go func() {
 				for i := 0; i < sendOne; i++ {
 					s.statsChan <- recStats{
-						messageReceived: true,
-						payload:         int32(payloadOne),
+						MessageType: RECEIVED,
+						Payload:     int32(payloadOne),
 					}
 				}
 				wg.Done()
@@ -119,13 +120,13 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 			go func() {
 				for i := 0; i < sendTwo; i++ {
 					s.statsChan <- recStats{
-						messageReceived: true,
-						payload:         int32(payloadTwo),
+						MessageType: RECEIVED,
+						Payload:     int32(payloadTwo),
 					}
 				}
 				for j := 0; j < relayCount; j++ {
 					s.statsChan <- recStats{
-						messageRelayed: true,
+						MessageType: RELAYED,
 					}
 				}
 				wg.Done()
@@ -275,29 +276,171 @@ func (s *testPathsStreamServer) Cancel() {
 
 func TestMessengerServer_processMessages(t *testing.T) {
 	tests := []struct {
-		name          string
-		numWorkers    int
-		payloadAmount int32
-		numMessages   int
-		wantPayload   int64
-		wantReceived  int64
-		wantRelayed   int64
+		name                      string
+		numWorkers                int
+		numSenders                int
+		payloadAmount             int32
+		numSinkMessagesPerSender  int
+		numRelayMessagesPerSender int
+		wantPayload               int64
+		wantReceived              int64
+		wantRelayed               int64
+		otherNodes                map[string][]string
 	}{
 		{
-			name:          "only process sink messages when path to relay node is unknown",
-			numWorkers:    10,
-			payloadAmount: 1000,
-			numMessages:   20,
-			wantPayload:   1000 * 10,
-			wantReceived:  10,
-			wantRelayed:   0,
+			name:                      "correctly process sink messages",
+			numWorkers:                10,
+			numSenders:                5,
+			payloadAmount:             1000,
+			numSinkMessagesPerSender:  100,
+			numRelayMessagesPerSender: 0,
 		},
-		// {
-		// 	name:          "handle relay and sink messages correctly",
-		// 	numWorkers:    10,
-		// 	payloadAmount: 1000,
-		// 	numMessages:   200,
-		// },
+		{
+			name:                      "handle relay and sink messages correctly when path is known",
+			numWorkers:                10,
+			numSenders:                10,
+			payloadAmount:             1000,
+			numSinkMessagesPerSender:  100,
+			numRelayMessagesPerSender: 100,
+			otherNodes: map[string][]string{
+				"127.0.0.1:9999": {
+					"127.0.0.1:8888",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockOtherNode := messaging.NewMockPathMessengerClient(gomock.NewController(t))
+			s := &MessengerServer{
+				serverAddress: "127.0.0.1:8000",
+				shutdownChan:  make(chan struct{}),
+				statsChan:     make(chan recStats),
+				nodePathDict:  tt.otherNodes,
+				nodeConns: map[string]messaging.PathMessengerClient{
+					"127.0.0.1:8888": mockOtherNode,
+				},
+			}
+
+			s.setWorkValues(tt.numWorkers)
+			go s.trackReceivedData(s.statsChan, s.shutdownChan)
+			go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
+
+			tt.wantReceived = int64(tt.numSenders) * int64(tt.numSinkMessagesPerSender)
+			tt.wantPayload = tt.wantReceived * int64(tt.payloadAmount)
+			tt.wantRelayed = int64(tt.numSenders) * int64(tt.numRelayMessagesPerSender)
+
+			testStart := time.Now()
+
+			wg := &sync.WaitGroup{}
+
+			for i := 0; i < tt.numSenders; i++ {
+				wg.Add(1)
+				go messageTargetNode(tt.numSinkMessagesPerSender, tt.payloadAmount,
+					s.serverAddress, s.workChan, wg)
+			}
+
+			for i := 0; i < tt.numSenders; i++ {
+				wg.Add(1)
+				go messageRelayNode(s.serverAddress, "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numRelayMessagesPerSender, tt.payloadAmount, wg)
+			}
+
+			// when running, nodes will finish their task and inform the registration node.
+			// can't do that here so wait until expected messages are processed or it's been too long.
+			wg.Add(1)
+			go func() {
+				for s.messagesReceived+s.messagesRelayed < tt.wantReceived+tt.wantRelayed {
+					// shut down after a max of 3 seconds
+					if time.Since(testStart).Seconds() >= 3 {
+						close(s.shutdownChan)
+						fmt.Printf("forced shut down, received: %v\tpayload: %v\t relayed:%v", s.messagesReceived, s.payloadReceived, s.messagesRelayed)
+						return
+					}
+					time.Sleep(time.Millisecond * 10)
+				}
+				wg.Done()
+			}()
+
+			wg.Wait()
+
+			m, _ := s.GetMessagingData(context.Background(), &messaging.MessagingDataRequest{})
+
+			if tt.wantReceived != m.MessagesReceived {
+				t.Fatalf("messages received differs, want %v got %v", tt.wantReceived, m.MessagesReceived)
+			}
+
+			if tt.wantPayload != m.PayloadReceived {
+				t.Fatalf("payload received differs, want %v got %v", tt.wantPayload, m.PayloadReceived)
+			}
+
+			if tt.wantRelayed != m.MessagesRelayed {
+				t.Fatalf("messages relayed differs, want %v got %v", tt.wantRelayed, m.MessagesRelayed)
+			}
+		})
+	}
+}
+
+func messageTargetNode(numMessages int, payloadAmount int32, targetSink string, targetChan chan *messaging.PathMessage, wg *sync.WaitGroup) {
+	for i := 0; i < numMessages; i++ {
+		targetChan <- &messaging.PathMessage{
+			Payload: payloadAmount,
+			Destination: &messaging.Node{
+				Id: targetSink,
+			},
+			Path: []*messaging.Node{},
+		}
+	}
+	wg.Done()
+}
+
+func messageRelayNode(senderID string, destinationAddress string, targetRelayNode *messaging.MockPathMessengerClient,
+	senderChan chan *messaging.PathMessage,
+	numMessages int, payloadAmount int32, wg *sync.WaitGroup) {
+
+	for i := 0; i < numMessages; i++ {
+		targetRelayNode.EXPECT().AcceptMessage(gomock.Any(), &messaging.PathMessage{
+			Payload: payloadAmount,
+			Destination: &messaging.Node{
+				Id: destinationAddress,
+			},
+			Path: []*messaging.Node{{Id: senderID}},
+		}).Return(&messaging.PathResponse{}, nil)
+
+		senderChan <- &messaging.PathMessage{
+			Payload: payloadAmount,
+			Destination: &messaging.Node{
+				Id: destinationAddress,
+			},
+			Path: []*messaging.Node{},
+		}
+	}
+
+	wg.Done()
+}
+
+func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
+	tests := []struct {
+		name                      string
+		numWorkers                int
+		numSenders                int
+		payloadAmount             int32
+		numRelayMessagesPerSender int
+		wantPayload               int64
+		wantReceived              int64
+		wantRelayed               int64
+		otherNodes                map[string][]string
+	}{
+		{
+			name:                      "handle discarding relay messages when path is unknown",
+			numWorkers:                10,
+			numSenders:                10,
+			payloadAmount:             1000,
+			numRelayMessagesPerSender: 100,
+			wantPayload:               0,
+			wantReceived:              0,
+			wantRelayed:               0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -306,66 +449,99 @@ func TestMessengerServer_processMessages(t *testing.T) {
 				serverAddress: "127.0.0.1:8000",
 				shutdownChan:  make(chan struct{}),
 				statsChan:     make(chan recStats),
+				nodePathDict:  tt.otherNodes,
 			}
 
 			s.setWorkValues(tt.numWorkers)
 			go s.trackReceivedData(s.statsChan, s.shutdownChan)
+			go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
 
 			testStart := time.Now()
 
-			mockOtherNode := messaging.NewMockPathMessengerClient(gomock.NewController(t))
+			wg := &sync.WaitGroup{}
 
-			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
+			for i := 0; i < tt.numSenders; i++ {
+				wg.Add(1)
+				go func() {
+					for i := 0; i < tt.numRelayMessagesPerSender; i++ {
+						s.workChan <- &messaging.PathMessage{
+							Payload: tt.payloadAmount,
+							Destination: &messaging.Node{
+								Id: "127.0.0.1:11111111",
+							},
+							Path: []*messaging.Node{},
+						}
+					}
 
-			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
+					wg.Done()
+				}()
+			}
 
-			go messageTargetNode("127.0.0.1:8000", "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numMessages, tt.payloadAmount)
-
+			// when running, nodes will finish their task and inform the registration node.
+			// can't do that here so wait until expected messages are processed or it's been too long.
+			wg.Add(1)
 			go func() {
 				for s.messagesReceived+s.messagesRelayed < tt.wantReceived+tt.wantRelayed {
-					// force shutdown after a max of 5 seconds
-					if time.Since(testStart).Seconds() >= 5 {
+					// shut down after a max of 3 seconds
+					if time.Since(testStart).Seconds() >= 3 {
 						close(s.shutdownChan)
+						fmt.Printf("forced shut down, received: %v\tpayload: %v\t relayed:%v", s.messagesReceived, s.payloadReceived, s.messagesRelayed)
 						return
 					}
-					time.Sleep(time.Millisecond * 50)
+					time.Sleep(time.Millisecond * 10)
 				}
-				close(s.shutdownChan)
+				wg.Done()
 			}()
 
-			s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
+			wg.Wait()
+
+			m, _ := s.GetMessagingData(context.Background(), &messaging.MessagingDataRequest{})
+
+			if tt.wantReceived != m.MessagesReceived {
+				t.Fatalf("messages received differs, want %v got %v", tt.wantReceived, m.MessagesReceived)
+			}
+
+			if tt.wantPayload != m.PayloadReceived {
+				t.Fatalf("payload received differs, want %v got %v", tt.wantPayload, m.PayloadReceived)
+			}
+
+			if tt.wantRelayed != m.MessagesRelayed {
+				t.Fatalf("messages relayed differs, want %v got %v", tt.wantRelayed, m.MessagesRelayed)
+			}
 		})
 	}
 }
 
-func messageTargetNode(targetSink string, targetRelayAddress string, targetRelayNode *messaging.MockPathMessengerClient,
-	targetChan chan *messaging.PathMessage, numMessages int, payloadAmount int32) {
+// func TestMessengerServer_doTask(t *testing.T) {
+// 	tests := []struct {
+// 		name       string
+// 		otherNodes map[string][]string
+// 	}{
+// 		{
+// 			name: "send messages to another node successfully",
+// 			otherNodes: map[string][]string{
+// 				"127.0.0.1:9999": {"127.0.0.1:8888"},
+// 			},
+// 		},
+// 	}
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			s := &MessengerServer{
+// 				nodePathDict: tt.otherNodes,
+// 			}
+// 			c := make(chan struct{})
 
-	for i := 0; i < numMessages; i++ {
-		if i%2 == 0 {
-			targetChan <- &messaging.PathMessage{
-				Payload: payloadAmount,
-				Destination: &messaging.Node{
-					Id: targetSink,
-				},
-				Path: []*messaging.Node{},
-			}
-		} else {
-			// targetRelayNode.EXPECT().AcceptMessage(gomock.Any(), &messaging.PathMessage{
-			// 	Payload: payloadAmount,
-			// 	Destination: &messaging.Node{
-			// 		Id: targetRelayAddress,
-			// 	},
-			// 	Path: []*messaging.Node{{Id: targetSink}},
-			// }).Return(&messaging.PathResponse{}, nil)
+// 			wg := &sync.WaitGroup{}
+// 			wg.Add(1)
 
-			targetChan <- &messaging.PathMessage{
-				Payload: payloadAmount,
-				Destination: &messaging.Node{
-					Id: targetRelayAddress,
-				},
-				Path: []*messaging.Node{},
-			}
-		}
-	}
-}
+// 			go func() {
+// 				s.doTask(c)
+// 				wg.Done()
+// 			}()
+
+// 			wg.Wait()
+
+// 			// check sent payload and message count
+// 		})
+// 	}
+// }

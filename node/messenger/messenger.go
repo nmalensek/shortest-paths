@@ -56,10 +56,16 @@ type MessengerServer struct {
 }
 
 type recStats struct {
-	messageReceived bool
-	messageRelayed  bool
-	payload         int32
+	MessageType statsType
+	Payload     int32
 }
+
+type statsType int
+
+const (
+	RECEIVED statsType = iota
+	RELAYED
+)
 
 // New returns a new instance of MessengerServer.
 func New(serverAddr string) *MessengerServer {
@@ -261,15 +267,15 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 				if m.Destination != nil {
 					if m.Destination.Id == s.serverAddress {
 						statsChan <- recStats{
-							messageReceived: true,
-							payload:         m.Payload,
+							MessageType: RECEIVED,
+							Payload:     m.Payload,
 						}
 						return
 					}
 
 					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
 					if len(s.nodePathDict[m.Destination.Id]) < 1 {
-						// TODO turn into an error message when logging's added
+						// TODO: turn into an error message when logging's added
 						fmt.Printf("no path to %v, discarding message\n", m.Destination.Id)
 						return
 					}
@@ -277,7 +283,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 					nextNode := s.nodePathDict[m.Destination.Id][0]
 
 					statsChan <- recStats{
-						messageRelayed: true,
+						MessageType: RELAYED,
 					}
 
 					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -290,9 +296,9 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 				}
 			}()
 		case <-quitChan:
+			s.sem.Acquire(context.Background(), int64(s.maxWorkers))
 			return
 		}
-
 	}
 }
 
@@ -300,12 +306,12 @@ func (s *MessengerServer) trackReceivedData(sChan chan recStats, quit chan struc
 	for {
 		select {
 		case m := <-sChan:
-			switch {
-			case m.messageRelayed:
-				s.messagesRelayed++
-			case m.messageReceived:
+			switch m.MessageType {
+			case RECEIVED:
 				s.messagesReceived++
-				s.payloadReceived += int64(m.payload)
+				s.payloadReceived += int64(m.Payload)
+			case RELAYED:
+				s.messagesRelayed++
 			}
 		case <-quit:
 			return
@@ -326,9 +332,6 @@ func (s *MessengerServer) GetMessagingData(context.Context, *messaging.Messaging
 		PayloadReceived:  s.payloadReceived,
 	}
 	s.mu.Unlock()
-
-	// if the registration node is asking for stats then the task's done, shutdown extra processes.
-	close(s.shutdownChan)
 
 	return data, nil
 }
