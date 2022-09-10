@@ -24,8 +24,11 @@ type Config struct {
 	// The server port
 	Port int `json:"port"`
 
-	// The number of 5-message batches every other node in the overlay needs to send
-	Rounds int `json:"rounds"`
+	// The number of message batches every other node in the overlay needs to send
+	Batches int `json:"batches"`
+
+	// The number of messages in a batch
+	MessagesPerBatch int `json:"messagesPerBatch"`
 
 	// The number of nodes every other node must be connected to
 	Connections int `json:"connections"`
@@ -76,7 +79,7 @@ func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 	return rs
 }
 
-//RegisterNode stores the address of the sender in a map of known nodes.
+// RegisterNode stores the address of the sender in a map of known nodes.
 func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node) (*messaging.RegistrationResponse, error) {
 	if ctx.Err() == context.Canceled {
 		return &messaging.RegistrationResponse{}, status.Error(codes.Canceled, "client canceled registration, aborting")
@@ -118,7 +121,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 	return &messaging.RegistrationResponse{}, nil
 }
 
-//DeregisterNode removes the node address from the map of known nodes.
+// DeregisterNode removes the node address from the map of known nodes.
 func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.Node) (*messaging.DeregistrationResponse, error) {
 	if ctx.Err() == context.Canceled {
 		return &messaging.DeregistrationResponse{}, status.Error(codes.Canceled, "client canceled de-registration, abandoning")
@@ -241,15 +244,16 @@ func (s *RegistrationServer) startTasks() {
 	for k, n := range s.nodeConnections {
 		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
 		_, err := n.StartTask(ctx, &messaging.TaskRequest{
-			BatchesToSend:    int64(s.settings.Rounds),
-			MessagesPerBatch: 5,
+			BatchesToSend:    int64(s.settings.Batches),
+			MessagesPerBatch: int64(s.settings.MessagesPerBatch),
 		})
 		cancel()
+
 		retries := 0
 		for err != nil && retries < 3 {
 			time.Sleep(time.Millisecond * 100)
 			_, err = n.StartTask(ctx, &messaging.TaskRequest{
-				BatchesToSend:    int64(s.settings.Rounds),
+				BatchesToSend:    int64(s.settings.Batches),
 				MessagesPerBatch: 5,
 			})
 			retries++
@@ -278,8 +282,9 @@ func (s *RegistrationServer) requestMetadata() {
 // ProcessMetadata prints out formatted metadata about the most recently completed task.
 func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging.MessagingMetadata) (*messaging.MetadataConfirmation, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.metadata[mmd.GetSender().Id] = mmd
-	s.mu.Unlock()
 
 	if len(s.metadata) == len(s.registeredNodes) {
 		printMetadata(s.metadata)
