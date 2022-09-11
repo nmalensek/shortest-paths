@@ -7,11 +7,13 @@ import (
 	"log"
 	"math"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/overlay"
+	"github.com/rs/zerolog"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,6 +24,7 @@ import (
 type Config struct {
 	RegistrationIP   string `json:"registrationIP"`
 	RegistrationPort int    `json:"registrationPort"`
+	LogLevel         string `json:"logLevel"`
 }
 
 // MessengerServer is an instance of a messenger (worker) in an overlay
@@ -29,6 +32,7 @@ type MessengerServer struct {
 	messaging.UnimplementedPathMessengerServer
 	serverAddress   string
 	registratonConn messaging.OverlayRegistrationClient
+	logger          zerolog.Logger
 	startTaskChan   chan struct{}
 	mu              sync.Mutex
 	pathChan        chan struct{}
@@ -68,7 +72,7 @@ const (
 )
 
 // New returns a new instance of MessengerServer.
-func New(serverAddr string) *MessengerServer {
+func New(serverAddr string, logLevel string) *MessengerServer {
 	ms := &MessengerServer{
 		serverAddress: serverAddr,
 		nodePathDict:  make(map[string][]string),
@@ -78,6 +82,17 @@ func New(serverAddr string) *MessengerServer {
 		statsChan:     make(chan recStats),
 		shutdownChan:  make(chan struct{}),
 	}
+
+	level, err := zerolog.ParseLevel(logLevel)
+	if err != nil {
+		log.Fatalf("invalid zerolog log level provided (%v)", logLevel)
+	}
+
+	ms.logger = zerolog.New(os.Stdout).With().
+		Timestamp().
+		Str("node", ms.serverAddress).
+		Logger().Level(level)
+
 	go ms.calculatePathsWhenReady(ms.pathChan)
 	go ms.doTask(ms.startTaskChan)
 	go ms.trackReceivedData(ms.statsChan, ms.shutdownChan)
@@ -106,11 +121,12 @@ func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskReque
 }
 
 func (s *MessengerServer) doTask(c chan struct{}) {
+	<-c
+
 	if s.batchMessages <= 0 {
-		log.Fatal("MessengerServer cannot do task, batchMessages is less than zero")
+		s.logger.Panic().Msg("cannot do task, batchMessages is less than zero")
 		return
 	}
-	<-c
 
 	// make list of node IDs to randomly select one
 	addrList := make([]string, 0, len(s.nodePathDict))
@@ -150,7 +166,8 @@ func (s *MessengerServer) doTask(c chan struct{}) {
 
 			if err != nil {
 				sleepTime := 5
-				fmt.Printf("error sending a message to %v, trying again in %v ms: %v", s.nodePathDict[r][0], sleepTime, err)
+				s.logger.Warn().Err(err).Str("destination", s.nodePathDict[r][0]).Int("wait (ms)", sleepTime)
+
 				time.Sleep(time.Millisecond * time.Duration(sleepTime))
 				continue
 			}
@@ -244,7 +261,7 @@ func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
 	}
 	defer cancel()
 
-	fmt.Println("Successfully notified registration node that this node is ready")
+	s.logger.Info().Msg("successfully notified registration node that this node is ready")
 }
 
 // AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
@@ -262,7 +279,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 		select {
 		case m := <-workChan:
 			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
-				log.Printf("Failed to acquire semaphore: %v", err)
+				s.logger.Warn().Err(err).Msg("failed to acquire semaphore")
 				break
 			}
 
@@ -279,8 +296,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 
 					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
 					if len(s.nodePathDict[m.Destination.Id]) < 1 {
-						// TODO: turn into an error message when logging's added
-						fmt.Printf("no path to %v, discarding message\n", m.Destination.Id)
+						s.logger.Error().Str("destination", m.Destination.Id).Msg("no known path, discarding message")
 						return
 					}
 
@@ -295,7 +311,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 
 					_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
 					if err != nil {
-						fmt.Printf("error relaying message %v: %v\n", m, err)
+						s.logger.Err(err).Msgf("%v", m)
 					}
 				}
 			}()

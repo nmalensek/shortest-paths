@@ -87,7 +87,7 @@ func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 		log.Fatalf("invalid zerolog log level provided (%v)", conf.LogLevel)
 	}
 
-	rs.logger = zerolog.New(os.Stderr).With().
+	rs.logger = zerolog.New(os.Stdout).With().
 		Timestamp().
 		Str("node", fmt.Sprintf("registration:%v", conf.Port)).
 		Logger().Level(logLevel)
@@ -130,7 +130,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 	pClient := messaging.NewPathMessengerClient(conn)
 	s.nodeConnections[n.Id] = pClient
 
-	s.logger.Info().Str("registered node", n.String()).Msg("")
+	s.logger.Info().Str("successful registration", n.GetId()).Msg("")
 
 	if len(s.registeredNodes) == s.settings.Peers {
 		s.newRegistrationChan <- struct{}{}
