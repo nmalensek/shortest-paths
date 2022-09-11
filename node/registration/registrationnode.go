@@ -3,7 +3,9 @@ package registration
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +15,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/rs/zerolog"
 )
 
 type dialer interface {
@@ -35,6 +39,8 @@ type Config struct {
 
 	// The total number of nodes that need to be present in the overlay before starting the task
 	Peers int `json:"peers"`
+
+	LogLevel string `json:"logLevel"`
 }
 
 // RegistrationServer contains everything needed to orchestrate overlay nodes' task(s).
@@ -42,6 +48,7 @@ type RegistrationServer struct {
 	messaging.UnimplementedOverlayRegistrationServer
 	mu                  sync.RWMutex
 	settings            Config
+	logger              zerolog.Logger
 	overlaySent         bool
 	opts                []grpc.DialOption
 	dial                func(string, ...grpc.DialOption) (*grpc.ClientConn, error)
@@ -74,6 +81,17 @@ func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 		finishedNodes:       make(map[string]struct{}),
 		nodeConnections:     make(map[string]messaging.PathMessengerClient),
 	}
+
+	logLevel, err := zerolog.ParseLevel(conf.LogLevel)
+	if err != nil {
+		log.Fatalf("invalid zerolog log level provided (%v)", conf.LogLevel)
+	}
+
+	rs.logger = zerolog.New(os.Stderr).With().
+		Timestamp().
+		Str("node", fmt.Sprintf("registration:%v", conf.Port)).
+		Logger().Level(logLevel)
+
 	go rs.monitorOverlayStatus()
 
 	return rs
@@ -112,7 +130,7 @@ func (s *RegistrationServer) RegisterNode(ctx context.Context, n *messaging.Node
 	pClient := messaging.NewPathMessengerClient(conn)
 	s.nodeConnections[n.Id] = pClient
 
-	fmt.Printf("registered node: %v\n", n.String())
+	s.logger.Info().Str("registered node", n.String()).Msg("")
 
 	if len(s.registeredNodes) == s.settings.Peers {
 		s.newRegistrationChan <- struct{}{}
@@ -143,7 +161,7 @@ func (s *RegistrationServer) DeregisterNode(ctx context.Context, n *messaging.No
 
 	delete(s.registeredNodes, n.GetId())
 
-	fmt.Printf("node %v successfully deregistered\n", n.GetId())
+	s.logger.Info().Msgf("node %v successfully deregistered\n", n.GetId())
 
 	return &messaging.DeregistrationResponse{}, nil
 }
@@ -215,10 +233,7 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 			// TODO: do this from a cli client
 			errs := s.buildAndPushOverlay()
 			if len(errs) > 0 {
-				fmt.Println("task construction failed with the following errors:")
-				for _, e := range errs {
-					fmt.Println(e)
-				}
+				s.logger.Error().Errs("task construction errors", errs).Msg("")
 			}
 		case n := <-s.nodeStatusChan:
 			s.mu.Lock()
@@ -254,11 +269,11 @@ func (s *RegistrationServer) startTasks() {
 			time.Sleep(time.Millisecond * 100)
 			_, err = n.StartTask(ctx, &messaging.TaskRequest{
 				BatchesToSend:    int64(s.settings.Batches),
-				MessagesPerBatch: 5,
+				MessagesPerBatch: int64(s.settings.MessagesPerBatch),
 			})
 			retries++
 			if retries == 3 {
-				fmt.Printf("unable to successfully tell node %v to start task processing, skipping...\n", k)
+				s.logger.Error().Msgf("unable to successfully tell node %v to start task processing after %v retries, skipping...\n", k, retries)
 			}
 		}
 	}
@@ -269,7 +284,7 @@ func (s *RegistrationServer) requestMetadata() {
 		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
 		data, err := s.nodeConnections[k].GetMessagingData(ctx, &messaging.MessagingDataRequest{})
 		if err != nil {
-			fmt.Printf("failed to get metadata from node %v: %v", k, err)
+			s.logger.Error().Msgf("failed to get metadata from node %v: %v", k, err)
 		}
 		s.metadata[k] = data
 

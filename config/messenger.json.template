@@ -1,4 +1,5 @@
 {
     "registrationIp" : "127.0.0.1",
-    "registrationPort": 9001
+    "registrationPort": 9001,
+    "logLevel": "debug"
 }

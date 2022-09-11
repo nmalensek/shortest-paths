@@ -1,9 +1,13 @@
 {
     "port": 9001,
     
-    "rounds": 1000,
+    "batches": 1000,
+
+    "messagesPerBatch": 5,
 
 	"connections": 4,
 
-	"peers": 6
+	"peers": 6,
+
+    "logLevel": "debug"
 }

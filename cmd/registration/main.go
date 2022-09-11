@@ -33,7 +33,8 @@ func main() {
 	grpcServer := grpc.NewServer()
 
 	messaging.RegisterOverlayRegistrationServer(grpcServer,
-		registration.New([]grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}, conf))
+		registration.New([]grpc.DialOption{grpc.WithBlock(), grpc.WithInsecure()}, conf),
+	)
 
 	err = grpcServer.Serve(listener)
 	if err != nil {
