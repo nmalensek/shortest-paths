@@ -132,7 +132,7 @@ func TestMessengerServer_trackReceivedData(t *testing.T) {
 				wg.Done()
 			}()
 
-			go s.trackReceivedData(s.statsChan, s.shutdownChan)
+			go s.trackReceivedData()
 
 			wg.Wait()
 
@@ -324,8 +324,8 @@ func TestMessengerServer_processMessages(t *testing.T) {
 			}
 
 			s.setWorkValues(tt.numWorkers)
-			go s.trackReceivedData(s.statsChan, s.shutdownChan)
-			go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
+			go s.trackReceivedData()
+			go s.processMessages()
 
 			tt.wantReceived = int64(tt.numSenders) * int64(tt.numSinkMessagesPerSender)
 			tt.wantPayload = tt.wantReceived * int64(tt.payloadAmount)
@@ -453,8 +453,8 @@ func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
 			}
 
 			s.setWorkValues(tt.numWorkers)
-			go s.trackReceivedData(s.statsChan, s.shutdownChan)
-			go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
+			go s.trackReceivedData()
+			go s.processMessages()
 
 			testStart := time.Now()
 
@@ -539,8 +539,8 @@ func TestMessengerServer_doTask(t *testing.T) {
 				messagesSentRequirement: tt.numMessages,
 				batchMessages:           5,
 				registratonConn:         mockRegistrationClient,
+				startTaskChan:           make(chan struct{}),
 			}
-			c := make(chan struct{})
 			mockRegistrationClient.EXPECT().NodeFinished(gomock.Any(), &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_COMPLETE})
 
 			for i := 0; i < int(tt.numMessages); i++ {
@@ -551,11 +551,11 @@ func TestMessengerServer_doTask(t *testing.T) {
 			wg.Add(1)
 
 			go func() {
-				s.doTask(c)
+				s.doTask()
 				wg.Done()
 			}()
 
-			c <- struct{}{}
+			s.startTaskChan <- struct{}{}
 
 			wg.Wait()
 

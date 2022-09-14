@@ -93,9 +93,9 @@ func New(serverAddr string, logLevel string) *MessengerServer {
 		Str("node", ms.serverAddress).
 		Logger().Level(level)
 
-	go ms.calculatePathsWhenReady(ms.pathChan)
-	go ms.doTask(ms.startTaskChan)
-	go ms.trackReceivedData(ms.statsChan, ms.shutdownChan)
+	go ms.calculatePathsWhenReady()
+	go ms.doTask()
+	go ms.trackReceivedData()
 
 	return ms
 }
@@ -120,8 +120,8 @@ func (s *MessengerServer) StartTask(ctx context.Context, tr *messaging.TaskReque
 	return &messaging.TaskConfirmation{}, nil
 }
 
-func (s *MessengerServer) doTask(c chan struct{}) {
-	<-c
+func (s *MessengerServer) doTask() {
+	<-s.startTaskChan
 
 	if s.batchMessages <= 0 {
 		s.logger.Panic().Msg("cannot do task, batchMessages is less than zero")
@@ -211,8 +211,8 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 	}
 }
 
-func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
-	<-waitChan
+func (s *MessengerServer) calculatePathsWhenReady() {
+	<-s.pathChan
 
 	// map of each node to edges it's part of.
 	overlayConnections := make(map[string][]*messaging.Edge)
@@ -251,7 +251,7 @@ func (s *MessengerServer) calculatePathsWhenReady(waitChan chan struct{}) {
 	}
 
 	s.setWorkValues(len(otherNodes))
-	go s.processMessages(s.workChan, s.statsChan, s.shutdownChan)
+	go s.processMessages()
 
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
@@ -270,14 +270,14 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 	return &messaging.PathResponse{}, nil
 }
 
-func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, statsChan chan recStats, quitChan chan struct{}) {
-	if workChan == nil || quitChan == nil || statsChan == nil {
+func (s *MessengerServer) processMessages() {
+	if s.workChan == nil || s.shutdownChan == nil || s.statsChan == nil {
 		log.Fatal("all work channels must be non-nil")
 		return
 	}
 	for {
 		select {
-		case m := <-workChan:
+		case m := <-s.workChan:
 			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
 				s.logger.Warn().Err(err).Msg("failed to acquire semaphore")
 				break
@@ -287,7 +287,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 				defer s.sem.Release(1)
 				if m.Destination != nil {
 					if m.Destination.Id == s.serverAddress {
-						statsChan <- recStats{
+						s.statsChan <- recStats{
 							MessageType: RECEIVED,
 							Payload:     m.Payload,
 						}
@@ -302,7 +302,7 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 
 					nextNode := s.nodePathDict[m.Destination.Id][0]
 
-					statsChan <- recStats{
+					s.statsChan <- recStats{
 						MessageType: RELAYED,
 					}
 
@@ -315,17 +315,17 @@ func (s *MessengerServer) processMessages(workChan chan *messaging.PathMessage, 
 					}
 				}
 			}()
-		case <-quitChan:
+		case <-s.shutdownChan:
 			s.sem.Acquire(context.Background(), int64(s.maxWorkers))
 			return
 		}
 	}
 }
 
-func (s *MessengerServer) trackReceivedData(sChan chan recStats, quit chan struct{}) {
+func (s *MessengerServer) trackReceivedData() {
 	for {
 		select {
-		case m := <-sChan:
+		case m := <-s.statsChan:
 			switch m.MessageType {
 			case RECEIVED:
 				s.messagesReceived++
@@ -333,7 +333,7 @@ func (s *MessengerServer) trackReceivedData(sChan chan recStats, quit chan struc
 			case RELAYED:
 				s.messagesRelayed++
 			}
-		case <-quit:
+		case <-s.shutdownChan:
 			return
 		}
 	}
