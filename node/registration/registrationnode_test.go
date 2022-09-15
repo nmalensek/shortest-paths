@@ -111,3 +111,31 @@ func TestRegistrationServer_DeregisterNode(t *testing.T) {
 		})
 	}
 }
+
+func Test_printMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		d    map[string]*messaging.MessagingMetadata
+	}{
+		{
+			name: "test printout formatting",
+			d: map[string]*messaging.MessagingMetadata{
+				"0.0.0.0": {
+					MessagesSent:     1000,
+					MessagesReceived: 500,
+					MessagesRelayed:  1000,
+					PayloadSent:      1234234,
+					PayloadReceived:  253456363,
+					Sender: &messaging.Node{
+						Id: "0.0.0.0",
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			printMetadata(tt.d)
+		})
+	}
+}
