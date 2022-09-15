@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"text/tabwriter"
 	"time"
 
 	"github.com/nmalensek/shortest-paths/messaging"
@@ -73,6 +74,7 @@ func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 	rs := &RegistrationServer{
 		registeredNodes:     make(map[string]*messaging.Node),
 		dial:                grpc.Dial,
+		metadata:            make(map[string]*messaging.MessagingMetadata),
 		opts:                opts,
 		settings:            conf,
 		newRegistrationChan: make(chan struct{}),
@@ -89,6 +91,7 @@ func New(opts []grpc.DialOption, conf Config) *RegistrationServer {
 
 	rs.logger = zerolog.New(os.Stdout).With().
 		Timestamp().
+		Caller().
 		Str("node", fmt.Sprintf("registration:%v", conf.Port)).
 		Logger().Level(logLevel)
 
@@ -194,6 +197,7 @@ func (s *RegistrationServer) buildAndPushOverlay() []error {
 	}
 
 	s.overlay = overlay.BuildOverlay(nodes, s.settings.Connections, true)
+	// s.overlay = overlay.BuildOverlay(nodes, s.settings.Connections, false)
 
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Second*15))
 	defer cancel()
@@ -226,6 +230,11 @@ func (s *RegistrationServer) NodeReady(ctx context.Context, n *messaging.NodeSta
 	return &messaging.TaskReadyResponse{}, nil
 }
 
+func (s *RegistrationServer) NodeFinished(ctx context.Context, n *messaging.NodeStatus) (*messaging.TaskCompleteResponse, error) {
+	s.nodeStatusChan <- n
+	return &messaging.TaskCompleteResponse{}, nil
+}
+
 func (s *RegistrationServer) monitorOverlayStatus() {
 	for {
 		select {
@@ -241,9 +250,11 @@ func (s *RegistrationServer) monitorOverlayStatus() {
 			case n.Status == messaging.NodeStatus_READY:
 				s.idleNodes[n.Id] = struct{}{}
 				if len(s.idleNodes) == s.settings.Peers {
+					s.logger.Info().Msgf("%v nodes ready, starting task...", len(s.idleNodes))
 					go s.startTasks()
 				}
 			case n.Status == messaging.NodeStatus_COMPLETE:
+				s.logger.Info().Str("node finished", n.Id).Msg("")
 				s.finishedNodes[n.Id] = struct{}{}
 				if len(s.finishedNodes) == len(s.registeredNodes) {
 					go s.requestMetadata()
@@ -262,6 +273,9 @@ func (s *RegistrationServer) startTasks() {
 			BatchesToSend:    int64(s.settings.Batches),
 			MessagesPerBatch: int64(s.settings.MessagesPerBatch),
 		})
+		if err == nil {
+			s.logger.Info().Str("node starting task", k).Msg("")
+		}
 		cancel()
 
 		retries := 0
@@ -316,17 +330,20 @@ func printMetadata(d map[string]*messaging.MessagingMetadata) {
 	var totalPayloadSent int64 = 0
 	var totalPayloadReceived int64 = 0
 
-	fmt.Println("Node\tMessages Sent\tMessages Received\tMessages Relayed\tPayload Sent\t Payload Received")
+	tw := tabwriter.NewWriter(os.Stdout, 20, 8, 1, ' ', tabwriter.Debug)
+	fmt.Fprintln(tw, "Node", "\t", "Messages Sent", "\t", "Messages Received", "\t", "Messages Relayed", "\t", "Payload Sent", "\t", "Payload Received")
+
 	for k, v := range d {
 		totalMessagesSent += v.MessagesSent
-		totalMessagesReceived += v.MessagesSent
+		totalMessagesReceived += v.MessagesReceived
 		totalMessagesRelayed += v.MessagesRelayed
 
 		totalPayloadSent += v.PayloadSent
 		totalPayloadReceived += v.PayloadReceived
 
-		fmt.Println(fmt.Sprintf("%v\t%v\t%v\t%v\t%v\t%v", k, v.GetMessagesSent(), v.GetMessagesReceived(), v.GetMessagesRelayed(), v.GetPayloadSent(), v.GetPayloadReceived()))
+		fmt.Fprintln(tw, k, "\t", v.GetMessagesSent(), "\t", v.GetMessagesReceived(), "\t", v.GetMessagesRelayed(), "\t", v.GetPayloadSent(), "\t", v.GetPayloadReceived())
 	}
-	fmt.Println("-------------------------------------------------------------------------")
-	fmt.Println(fmt.Sprintf("\t\t\t%v\t%v\t%v\t%v\t%v", totalMessagesSent, totalMessagesReceived, totalMessagesRelayed, totalPayloadSent, totalPayloadReceived))
+	fmt.Fprintln(tw, "-", "\t", "-", "\t", "-", "\t", "-", "\t", "-", "\t", "-")
+	fmt.Fprintln(tw, "Total", "\t", totalMessagesSent, "\t", totalMessagesReceived, "\t", totalMessagesRelayed, "\t", totalPayloadSent, "\t", totalPayloadReceived)
+	tw.Flush()
 }
