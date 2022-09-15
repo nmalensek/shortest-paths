@@ -38,17 +38,18 @@ func main() {
 	}
 	defer conn.Close()
 
+	regClient := messaging.NewOverlayRegistrationClient(conn)
+
 	// startPeerService starts a GRPC server on a random open port in a goroutine, capture its address
 	// and use it to register to the overlay.
 	peerChan := make(chan string)
-	startPeerService(peerChan, conf.LogLevel)
+	startPeerService(regClient, peerChan, conf.LogLevel)
 	myIP := <-peerChan
 	if strings.HasPrefix(myIP, "error") {
 		log.Fatal(myIP)
 	}
 	fmt.Printf("Listening on %v\n", myIP)
 
-	regClient := messaging.NewOverlayRegistrationClient(conn)
 	err = registerToOverlay(regClient, myIP)
 	if err != nil {
 		log.Fatalf("registration failed with error %v", err)
@@ -90,7 +91,7 @@ func setConfig() messenger.Config {
 	return conf
 }
 
-func startPeerService(c chan string, logLevel string) {
+func startPeerService(regConn messaging.OverlayRegistrationClient, c chan string, logLevel string) {
 	addr := addressing.GetIP()
 	go func() {
 		listen, err := net.Listen("tcp", fmt.Sprintf("%v:0", addr.String()))
@@ -100,7 +101,7 @@ func startPeerService(c chan string, logLevel string) {
 		c <- listen.Addr().String()
 
 		peerServe := grpc.NewServer()
-		messaging.RegisterPathMessengerServer(peerServe, messenger.New(listen.Addr().String(), logLevel))
+		messaging.RegisterPathMessengerServer(peerServe, messenger.New(listen.Addr().String(), regConn, logLevel))
 		serveErr := peerServe.Serve(listen)
 		if serveErr != nil {
 			log.Fatalf("server error: %v", serveErr)
