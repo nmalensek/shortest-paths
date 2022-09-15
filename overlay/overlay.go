@@ -78,6 +78,7 @@ func makeConnection(edgeMap map[string][]*messaging.Edge, connMap map[string]map
 		Source:      sourceNode,
 		Destination: targetNode,
 		Weight:      int32(randomWeight(weightGenerator)),
+		// Weight:      0,
 	}
 
 	edgeMap[sourceNode.Id] = append(edgeMap[sourceNode.Id], edge)

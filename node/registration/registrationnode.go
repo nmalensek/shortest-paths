@@ -343,7 +343,7 @@ func printMetadata(d map[string]*messaging.MessagingMetadata) {
 
 		fmt.Fprintln(tw, k, "\t", v.GetMessagesSent(), "\t", v.GetMessagesReceived(), "\t", v.GetMessagesRelayed(), "\t", v.GetPayloadSent(), "\t", v.GetPayloadReceived())
 	}
-	fmt.Fprintln(tw, "-", "\t", "-", "\t", "-", "\t", "-", "\t", "-", "\t", "-")
+	fmt.Fprintln(tw, "---", "\t", "---", "\t", "---", "\t", "---", "\t", "---", "\t", "---")
 	fmt.Fprintln(tw, "Total", "\t", totalMessagesSent, "\t", totalMessagesReceived, "\t", totalMessagesRelayed, "\t", totalPayloadSent, "\t", totalPayloadReceived)
 	tw.Flush()
 }
