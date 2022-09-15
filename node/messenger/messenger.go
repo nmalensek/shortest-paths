@@ -72,15 +72,17 @@ const (
 )
 
 // New returns a new instance of MessengerServer.
-func New(serverAddr string, logLevel string) *MessengerServer {
+func New(serverAddr string, regClient messaging.OverlayRegistrationClient, logLevel string) *MessengerServer {
 	ms := &MessengerServer{
-		serverAddress: serverAddr,
-		nodePathDict:  make(map[string][]string),
-		overlayEdges:  make([]*messaging.Edge, 0, 1),
-		pathChan:      make(chan struct{}),
-		startTaskChan: make(chan struct{}),
-		statsChan:     make(chan recStats),
-		shutdownChan:  make(chan struct{}),
+		serverAddress:   serverAddr,
+		registratonConn: regClient,
+		nodePathDict:    make(map[string][]string),
+		nodeConns:       make(map[string]messaging.PathMessengerClient),
+		overlayEdges:    make([]*messaging.Edge, 0, 1),
+		pathChan:        make(chan struct{}),
+		startTaskChan:   make(chan struct{}),
+		statsChan:       make(chan recStats),
+		shutdownChan:    make(chan struct{}),
 	}
 
 	level, err := zerolog.ParseLevel(logLevel)
@@ -90,6 +92,7 @@ func New(serverAddr string, logLevel string) *MessengerServer {
 
 	ms.logger = zerolog.New(os.Stdout).With().
 		Timestamp().
+		Caller().
 		Str("node", ms.serverAddress).
 		Logger().Level(level)
 
@@ -134,7 +137,7 @@ func (s *MessengerServer) doTask() {
 		addrList = append(addrList, addr)
 	}
 
-	randomGenerator := rand.New(rand.NewSource(time.Now().Unix()))
+	randomGenerator := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	for s.messagesSent < s.messagesSentRequirement {
 		// choose random recipient from connection list
@@ -201,6 +204,7 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 		edge, err := stream.Recv()
 		if err == io.EOF {
 			s.pathChan <- struct{}{}
+			s.logger.Debug().Msgf("got overlay:\n%v", s.overlayEdges)
 			return stream.SendAndClose(&messaging.ConnectionResponse{})
 		}
 		if err != nil {
@@ -248,6 +252,7 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 		}
 		n := messaging.NewPathMessengerClient(conn)
 		s.nodeConns[addr] = n
+		s.logger.Debug().Str("connected", addr)
 	}
 
 	s.setWorkValues(len(otherNodes))
@@ -261,7 +266,8 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 	}
 	defer cancel()
 
-	s.logger.Info().Msg("successfully notified registration node that this node is ready")
+	s.logger.Debug().Msg("successfully notified registration node that this node is ready")
+
 }
 
 // AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
@@ -307,15 +313,16 @@ func (s *MessengerServer) processMessages() {
 					}
 
 					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-					defer cancel()
-
 					_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
 					if err != nil {
 						s.logger.Err(err).Msgf("%v", m)
 					}
+
+					cancel()
 				}
 			}()
 		case <-s.shutdownChan:
+			s.logger.Info().Str("event", "processMessages() shutdown signal received").Msg("")
 			s.sem.Acquire(context.Background(), int64(s.maxWorkers))
 			return
 		}
@@ -334,6 +341,7 @@ func (s *MessengerServer) trackReceivedData() {
 				s.messagesRelayed++
 			}
 		case <-s.shutdownChan:
+			s.logger.Info().Str("event", "trackReceivedData() shutdown signal received").Msg("")
 			return
 		}
 	}
@@ -354,4 +362,17 @@ func (s *MessengerServer) GetMessagingData(context.Context, *messaging.Messaging
 	s.mu.Unlock()
 
 	return data, nil
+}
+
+func (s *MessengerServer) logNodeState() {
+	s.logger.Debug().
+		Str("server address", s.serverAddress).
+		Str("path dict", fmt.Sprintf("%v", s.nodePathDict)).
+		Str("overlay edges", fmt.Sprintf("%v", s.overlayEdges)).
+		Str("node connections", fmt.Sprintf("%v", s.nodeConns)).
+		Str("work chan", fmt.Sprintf("%+v", s.workChan)).
+		Int("max workers", s.maxWorkers).
+		Int("messages sent requirement", int(s.messagesSentRequirement)).
+		Stack().
+		Msg("")
 }
