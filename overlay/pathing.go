@@ -26,7 +26,7 @@ func GetAllShortestPaths(source string, dests map[string]struct{}, connections m
 // GetShortestPath calculates the shortest path from source to destination given a slice of edges.
 func GetShortestPath(sourceAddr string, destAddr string, connections map[string][]*messaging.Edge) ([]string, error) {
 	node := &graphEdge{
-		address: sourceAddr,
+		Address: sourceAddr,
 	}
 	unvisited := PriorityQueue{node}
 	heap.Init(&unvisited)
@@ -38,18 +38,18 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 			return nil, fmt.Errorf("failed to calculate shortest path from %v to %v; unvisited is empty", sourceAddr, destAddr)
 		}
 		node = heap.Pop(&unvisited).(*graphEdge)
-		node.path = append(node.path, node.address)
+		node.Path = append(node.Path, node.Address)
 
-		if node.address == destAddr {
+		if node.Address == destAddr {
 			// exclude first in path (start node)
-			return node.path[1:], nil
+			return node.Path[1:], nil
 		}
 
-		visited[node.address] = struct{}{}
-		for _, n := range connections[node.address] {
+		visited[node.Address] = struct{}{}
+		for _, n := range connections[node.Address] {
 			// handle edges being bidirectional by using the end that's not the current node.
 			target := n.Destination.Id
-			if n.Destination.Id == node.address {
+			if n.Destination.Id == node.Address {
 				target = n.Source.Id
 			}
 
@@ -57,14 +57,15 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 			item, inUnvisited := unvisited.Contains(target)
 			if !inVisited && !inUnvisited {
 				heap.Push(&unvisited, &graphEdge{
-					address: target,
-					weight:  int(n.Weight),
-					path:    node.path,
+					Address: target,
+					Weight:  int(n.Weight),
+					Path:    node.Path,
 				})
 			} else if inUnvisited {
-				current := item.(*graphEdge)
-				if current.weight > int(n.Weight) {
-					unvisited.update(current, current.address, int(n.Weight), node.path)
+				knownEdge := item.(*graphEdge)
+				// add previous weight?
+				if knownEdge.Weight > int(n.Weight) {
+					unvisited.update(knownEdge, knownEdge.Address, int(n.Weight), node.Path)
 				}
 			}
 		}
@@ -74,11 +75,11 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 // Adapted from https://pkg.go.dev/container/heap@go1.17.5
 // A graphEdge is something we manage in a priority queue.
 type graphEdge struct {
-	address string   // The value of the item; arbitrary.
-	weight  int      // The priority of the item in the queue.
-	path    []string // The node addresses making up the shortest path.
-	// The index is needed by update and is maintained by the heap.Interface methods.
-	index int // The index of the item in the heap.
+	Address string   // The value of the item; arbitrary.
+	Weight  int      // The priority of the item in the queue.
+	Path    []string // The node addresses making up the shortest path.
+	// The Index is needed by update and is maintained by the heap.Interface methods.
+	Index int // The index of the item in the heap.
 }
 
 // A PriorityQueue implements heap.Interface and holds graphEdges.
@@ -87,19 +88,19 @@ type PriorityQueue []*graphEdge
 func (pq PriorityQueue) Len() int { return len(pq) }
 
 func (pq PriorityQueue) Less(i, j int) bool {
-	return pq[i].weight < pq[j].weight
+	return pq[i].Weight < pq[j].Weight
 }
 
 func (pq PriorityQueue) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
-	pq[i].index = i
-	pq[j].index = j
+	pq[i].Index = i
+	pq[j].Index = j
 }
 
 func (pq *PriorityQueue) Push(x interface{}) {
 	n := len(*pq)
 	item := x.(*graphEdge)
-	item.index = n
+	item.Index = n
 	*pq = append(*pq, item)
 }
 
@@ -108,22 +109,22 @@ func (pq *PriorityQueue) Pop() interface{} {
 	n := len(old)
 	item := old[n-1]
 	old[n-1] = nil  // avoid memory leak
-	item.index = -1 // for safety
+	item.Index = -1 // for safety
 	*pq = old[0 : n-1]
 	return item
 }
 
 // update modifies the priority and value of a graphEdge in the queue.
 func (pq *PriorityQueue) update(item *graphEdge, address string, weight int, newPath []string) {
-	item.address = address
-	item.weight = weight
-	item.path = newPath
-	heap.Fix(pq, item.index)
+	item.Address = address
+	item.Weight = weight
+	item.Path = newPath
+	heap.Fix(pq, item.Index)
 }
 
 func (pq *PriorityQueue) Contains(address string) (interface{}, bool) {
 	for _, i := range *pq {
-		if i.address == address {
+		if i.Address == address {
 			return i, true
 		}
 	}
