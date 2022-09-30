@@ -38,11 +38,17 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 			return nil, fmt.Errorf("failed to calculate shortest path from %v to %v; unvisited is empty", sourceAddr, destAddr)
 		}
 		node = heap.Pop(&unvisited).(*graphEdge)
-		node.Path = append(node.Path, node.Address)
+		node.Path = append(node.Path, node)
 
 		if node.Address == destAddr {
+			finalPath := make([]string, 0, len(node.Path)-1)
+
 			// exclude first in path (start node)
-			return node.Path[1:], nil
+			for i := 1; i < len(node.Path); i++ {
+				finalPath = append(finalPath, node.Path[i].Address)
+			}
+
+			return finalPath, nil
 		}
 
 		visited[node.Address] = struct{}{}
@@ -56,16 +62,21 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 			_, inVisited := visited[target]
 			item, inUnvisited := unvisited.Contains(target)
 			if !inVisited && !inUnvisited {
+				// add the cumulative path weight to the current weight
+				pathWeight := int(n.Weight) + node.Path[len(node.Path)-1].Weight
+
 				heap.Push(&unvisited, &graphEdge{
 					Address: target,
-					Weight:  int(n.Weight),
+					Weight:  pathWeight,
 					Path:    node.Path,
 				})
+
 			} else if inUnvisited {
-				knownEdge := item.(*graphEdge)
-				// add previous weight?
-				if knownEdge.Weight > int(n.Weight) {
-					unvisited.update(knownEdge, knownEdge.Address, int(n.Weight), node.Path)
+				knownNode := item.(*graphEdge)
+				newWeight := int(n.Weight) + node.Path[len(node.Path)-1].Weight
+
+				if knownNode.Weight > newWeight {
+					unvisited.update(knownNode, knownNode.Address, newWeight, node.Path)
 				}
 			}
 		}
@@ -75,9 +86,9 @@ func GetShortestPath(sourceAddr string, destAddr string, connections map[string]
 // Adapted from https://pkg.go.dev/container/heap@go1.17.5
 // A graphEdge is something we manage in a priority queue.
 type graphEdge struct {
-	Address string   // The value of the item; arbitrary.
-	Weight  int      // The priority of the item in the queue.
-	Path    []string // The node addresses making up the shortest path.
+	Address string       // The value of the item; arbitrary.
+	Weight  int          // The priority of the item in the queue.
+	Path    []*graphEdge // The node addresses making up the shortest path.
 	// The Index is needed by update and is maintained by the heap.Interface methods.
 	Index int // The index of the item in the heap.
 }
@@ -115,7 +126,7 @@ func (pq *PriorityQueue) Pop() interface{} {
 }
 
 // update modifies the priority and value of a graphEdge in the queue.
-func (pq *PriorityQueue) update(item *graphEdge, address string, weight int, newPath []string) {
+func (pq *PriorityQueue) update(item *graphEdge, address string, weight int, newPath []*graphEdge) {
 	item.Address = address
 	item.Weight = weight
 	item.Path = newPath
