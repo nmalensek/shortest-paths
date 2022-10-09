@@ -163,13 +163,13 @@ func (s *MessengerServer) doTask() {
 				},
 			}
 
-			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
+			ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
 			_, err := firstNodeConn.AcceptMessage(ctx, msg)
 			cancel()
 
 			if err != nil {
-				sleepTime := 5
-				s.logger.Warn().Err(err).Str("destination", s.nodePathDict[r][0]).Int("wait (ms)", sleepTime)
+				sleepTime := 1000
+				s.logger.Warn().Err(err).Str("destination", s.nodePathDict[r][0]).Int("wait (ms)", sleepTime).Msg("")
 
 				time.Sleep(time.Millisecond * time.Duration(sleepTime))
 				continue
@@ -204,7 +204,7 @@ func (s *MessengerServer) PushPaths(stream messaging.PathMessenger_PushPathsServ
 		edge, err := stream.Recv()
 		if err == io.EOF {
 			s.pathChan <- struct{}{}
-			s.logger.Debug().Msgf("got overlay:\n%v", s.overlayEdges)
+			s.logger.Debug().Msgf("got overlay: %v", s.overlayEdges)
 			return stream.SendAndClose(&messaging.ConnectionResponse{})
 		}
 		if err != nil {
@@ -291,35 +291,41 @@ func (s *MessengerServer) processMessages() {
 
 			go func() {
 				defer s.sem.Release(1)
-				if m.Destination != nil {
-					if m.Destination.Id == s.serverAddress {
-						s.statsChan <- recStats{
-							MessageType: RECEIVED,
-							Payload:     m.Payload,
-						}
-						return
-					}
 
-					m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
-					if len(s.nodePathDict[m.Destination.Id]) < 1 {
-						s.logger.Error().Str("destination", m.Destination.Id).Msg("no known path, discarding message")
-						return
-					}
+				if m.Destination == nil {
+					s.logger.Error().Str("event", "message with no destination received").Str("message", fmt.Sprintf("%+v", m)).Msg("")
+					return
+				}
 
-					nextNode := s.nodePathDict[m.Destination.Id][0]
+				if m.Destination.Id == s.serverAddress {
+					s.logger.Debug().Str("event", "message received").Str("message", fmt.Sprintf("%+v", m)).Msg("")
 
 					s.statsChan <- recStats{
-						MessageType: RELAYED,
+						MessageType: RECEIVED,
+						Payload:     m.Payload,
 					}
-
-					ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
-					_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
-					if err != nil {
-						s.logger.Err(err).Msgf("%v", m)
-					}
-
-					cancel()
+					return
 				}
+
+				m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
+				if len(s.nodePathDict[m.Destination.Id]) == 0 {
+					s.logger.Error().Str("destination", m.Destination.Id).Msg("no known path, discarding message")
+					return
+				}
+
+				nextNode := s.nodePathDict[m.Destination.Id][0]
+
+				s.statsChan <- recStats{
+					MessageType: RELAYED,
+				}
+
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
+				_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
+				if err != nil {
+					s.logger.Err(err).Msgf("%v", m)
+				}
+
+				cancel()
 			}()
 		case <-s.shutdownChan:
 			s.logger.Info().Str("event", "processMessages() shutdown signal received").Msg("")
