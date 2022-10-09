@@ -81,7 +81,7 @@ func New(serverAddr string, regClient messaging.OverlayRegistrationClient, logLe
 		overlayEdges:    make([]*messaging.Edge, 0, 1),
 		pathChan:        make(chan struct{}),
 		startTaskChan:   make(chan struct{}),
-		statsChan:       make(chan recStats),
+		statsChan:       make(chan recStats, 1000),
 		shutdownChan:    make(chan struct{}),
 	}
 
