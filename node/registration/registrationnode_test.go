@@ -5,6 +5,7 @@ import (
 	"net"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/nmalensek/shortest-paths/messaging"
@@ -135,7 +136,7 @@ func Test_printMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			printMetadata(tt.d)
+			printMetadata(tt.d, time.Now())
 		})
 	}
 }

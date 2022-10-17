@@ -59,6 +59,7 @@ type RegistrationServer struct {
 	nodeStatusChan chan *messaging.NodeStatus
 	idleNodes      map[string]struct{}
 	finishedNodes  map[string]struct{}
+	startTime      time.Time
 
 	// Nodes that have registered; used to build the overlay.
 	registeredNodes map[string]*messaging.Node
@@ -291,6 +292,8 @@ func (s *RegistrationServer) startTasks() {
 			}
 		}
 	}
+
+	s.startTime = time.Now()
 }
 
 func (s *RegistrationServer) requestMetadata() {
@@ -305,7 +308,7 @@ func (s *RegistrationServer) requestMetadata() {
 		cancel()
 	}
 
-	printMetadata(s.metadata)
+	printMetadata(s.metadata, s.startTime)
 }
 
 // ProcessMetadata prints out formatted metadata about the most recently completed task.
@@ -316,13 +319,13 @@ func (s *RegistrationServer) ProcessMetadata(ctx context.Context, mmd *messaging
 	s.metadata[mmd.GetSender().Id] = mmd
 
 	if len(s.metadata) == len(s.registeredNodes) {
-		printMetadata(s.metadata)
+		printMetadata(s.metadata, s.startTime)
 	}
 
 	return &messaging.MetadataConfirmation{}, nil
 }
 
-func printMetadata(d map[string]*messaging.MessagingMetadata) {
+func printMetadata(d map[string]*messaging.MessagingMetadata, start time.Time) {
 	var totalMessagesSent int64 = 0
 	var totalMessagesReceived int64 = 0
 	var totalMessagesRelayed int64 = 0
@@ -346,4 +349,6 @@ func printMetadata(d map[string]*messaging.MessagingMetadata) {
 	fmt.Fprintln(tw, "---", "\t", "---", "\t", "---", "\t", "---", "\t", "---", "\t", "---")
 	fmt.Fprintln(tw, "Total", "\t", totalMessagesSent, "\t", totalMessagesReceived, "\t", totalMessagesRelayed, "\t", totalPayloadSent, "\t", totalPayloadReceived)
 	tw.Flush()
+
+	fmt.Printf("Task took %v seconds", time.Since(start).Seconds())
 }
