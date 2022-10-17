@@ -9,7 +9,7 @@ Once all nodes have completed their task, the Registration Node requests statist
 ## Shortest Path Algorithm
 Shortest paths are calculated using the Uniform Cost Search, a simplified version of Dijkstra's algorithm that only calculates shortest paths from one node at a time:  https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm#Practical_optimizations_and_infinite_graphs
 
-The UCS algorithm was selected so each node could concurrently calculate its own shortests paths to each other node in the overlay without doing throwaway work.
+The UCS algorithm was selected so each node could concurrently calculate its own shortests paths to each other node in the overlay instead of relying on the Registration Node to calculate all paths.
 
 ## Design Notes
 Originally, nodes had a worker pool implemented following the example here: https://pkg.go.dev/golang.org/x/sync/semaphore. The worker pool was used to process received messages; however, this meant sending was very cheap (the sender's gRPC call returned immediately) and quickly exhausted the worker pool. In overlays with six nodes, this quickly resulted in messages timing out because there was such a backlog of messages to get through, especially when the overlay happened to be set up so that all relay messages passed through the same 1-2 nodes. Removing the woker pool and requiring the sender to wait until a receiver had processed the message before sending another solved the problem, presumably because senders synchronized around receivers' statistics channels.
