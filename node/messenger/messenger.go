@@ -14,7 +14,6 @@ import (
 	"github.com/nmalensek/shortest-paths/messaging"
 	"github.com/nmalensek/shortest-paths/overlay"
 	"github.com/rs/zerolog"
-	"golang.org/x/sync/semaphore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -41,9 +40,6 @@ type MessengerServer struct {
 	overlayEdges []*messaging.Edge
 	nodeConns    map[string]messaging.PathMessengerClient
 
-	workChan     chan *messaging.PathMessage
-	maxWorkers   int
-	sem          *semaphore.Weighted
 	taskComplete bool
 
 	statsChan               chan recStats
@@ -81,7 +77,7 @@ func New(serverAddr string, regClient messaging.OverlayRegistrationClient, logLe
 		overlayEdges:    make([]*messaging.Edge, 0, 1),
 		pathChan:        make(chan struct{}),
 		startTaskChan:   make(chan struct{}),
-		statsChan:       make(chan recStats, 1000),
+		statsChan:       make(chan recStats),
 		shutdownChan:    make(chan struct{}),
 	}
 
@@ -101,12 +97,6 @@ func New(serverAddr string, regClient messaging.OverlayRegistrationClient, logLe
 	go ms.trackReceivedData()
 
 	return ms
-}
-
-func (s *MessengerServer) setWorkValues(maxWorkers int) {
-	s.maxWorkers = maxWorkers
-	s.workChan = make(chan *messaging.PathMessage, maxWorkers*5)
-	s.sem = semaphore.NewWeighted(int64(maxWorkers))
 }
 
 // StartTask starts the messenger's task.
@@ -255,9 +245,6 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 		s.logger.Debug().Str("connected", addr)
 	}
 
-	s.setWorkValues(len(otherNodes))
-	go s.processMessages()
-
 	// tell registration node this node's ready
 	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*100))
 	_, err = s.registratonConn.NodeReady(ctx, &messaging.NodeStatus{Id: s.serverAddress, Status: messaging.NodeStatus_READY})
@@ -272,67 +259,47 @@ func (s *MessengerServer) calculatePathsWhenReady() {
 
 // AcceptMessage either relays the message another hop toward its destination or processes the payload value if the node is the destination.
 func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathMessage) (*messaging.PathResponse, error) {
-	s.workChan <- mp
-	return &messaging.PathResponse{}, nil
-}
-
-func (s *MessengerServer) processMessages() {
-	if s.workChan == nil || s.shutdownChan == nil || s.statsChan == nil {
-		log.Fatal("all work channels must be non-nil")
-		return
+	if s.statsChan == nil {
+		log.Fatal("stats channel must be non-nil")
+		return nil, fmt.Errorf("node %v is not able to accept messages", s.serverAddress)
 	}
-	for {
-		select {
-		case m := <-s.workChan:
-			if err := s.sem.Acquire(context.TODO(), 1); err != nil {
-				s.logger.Warn().Err(err).Msg("failed to acquire semaphore")
-				break
-			}
 
-			go func() {
-				defer s.sem.Release(1)
+	if mp.Destination == nil {
+		s.logger.Error().Str("event", "message with no destination received").Str("message", fmt.Sprintf("%+v", mp)).Msg("")
+		return nil, status.Error(codes.FailedPrecondition, "message has no destination specified")
+	}
 
-				if m.Destination == nil {
-					s.logger.Error().Str("event", "message with no destination received").Str("message", fmt.Sprintf("%+v", m)).Msg("")
-					return
-				}
+	if mp.Destination.Id == s.serverAddress {
+		s.logger.Debug().Str("event", "message received").Str("message", fmt.Sprintf("%+v", mp)).Msg("")
 
-				if m.Destination.Id == s.serverAddress {
-					s.logger.Debug().Str("event", "message received").Str("message", fmt.Sprintf("%+v", m)).Msg("")
-
-					s.statsChan <- recStats{
-						MessageType: RECEIVED,
-						Payload:     m.Payload,
-					}
-					return
-				}
-
-				m.Path = append(m.Path, &messaging.Node{Id: s.serverAddress})
-				if len(s.nodePathDict[m.Destination.Id]) == 0 {
-					s.logger.Error().Str("destination", m.Destination.Id).Msg("no known path, discarding message")
-					return
-				}
-
-				nextNode := s.nodePathDict[m.Destination.Id][0]
-
-				s.statsChan <- recStats{
-					MessageType: RELAYED,
-				}
-
-				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
-				_, err := s.nodeConns[nextNode].AcceptMessage(ctx, m)
-				if err != nil {
-					s.logger.Err(err).Msgf("%v", m)
-				}
-
-				cancel()
-			}()
-		case <-s.shutdownChan:
-			s.logger.Info().Str("event", "processMessages() shutdown signal received").Msg("")
-			s.sem.Acquire(context.Background(), int64(s.maxWorkers))
-			return
+		s.statsChan <- recStats{
+			MessageType: RECEIVED,
+			Payload:     mp.Payload,
 		}
+		return &messaging.PathResponse{}, nil
 	}
+
+	mp.Path = append(mp.Path, &messaging.Node{Id: s.serverAddress})
+	if len(s.nodePathDict[mp.Destination.Id]) == 0 {
+		s.logger.Error().Str("destination", mp.Destination.Id).Msg("no known path, discarding message")
+		return nil, status.Error(codes.FailedPrecondition,
+			fmt.Sprintf("no known path to %v, discarding message", mp.Destination.Id))
+	}
+
+	nextNode := s.nodePathDict[mp.Destination.Id][0]
+
+	s.statsChan <- recStats{
+		MessageType: RELAYED,
+	}
+
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
+	_, err := s.nodeConns[nextNode].AcceptMessage(ctx, mp)
+	if err != nil {
+		s.logger.Err(err).Msgf("%v", mp)
+	}
+
+	cancel()
+	return &messaging.PathResponse{}, nil
 }
 
 func (s *MessengerServer) trackReceivedData() {
@@ -376,8 +343,6 @@ func (s *MessengerServer) logNodeState() {
 		Str("path dict", fmt.Sprintf("%v", s.nodePathDict)).
 		Str("overlay edges", fmt.Sprintf("%v", s.overlayEdges)).
 		Str("node connections", fmt.Sprintf("%v", s.nodeConns)).
-		Str("work chan", fmt.Sprintf("%+v", s.workChan)).
-		Int("max workers", s.maxWorkers).
 		Int("messages sent requirement", int(s.messagesSentRequirement)).
 		Stack().
 		Msg("")

@@ -289,7 +289,6 @@ func TestMessengerServer_processMessages(t *testing.T) {
 	}{
 		{
 			name:                      "correctly process sink messages",
-			numWorkers:                10,
 			numSenders:                5,
 			payloadAmount:             1000,
 			numSinkMessagesPerSender:  100,
@@ -297,7 +296,6 @@ func TestMessengerServer_processMessages(t *testing.T) {
 		},
 		{
 			name:                      "handle relay and sink messages correctly when path is known",
-			numWorkers:                10,
 			numSenders:                10,
 			payloadAmount:             1000,
 			numSinkMessagesPerSender:  100,
@@ -323,9 +321,7 @@ func TestMessengerServer_processMessages(t *testing.T) {
 				},
 			}
 
-			s.setWorkValues(tt.numWorkers)
 			go s.trackReceivedData()
-			go s.processMessages()
 
 			tt.wantReceived = int64(tt.numSenders) * int64(tt.numSinkMessagesPerSender)
 			tt.wantPayload = tt.wantReceived * int64(tt.payloadAmount)
@@ -335,15 +331,47 @@ func TestMessengerServer_processMessages(t *testing.T) {
 
 			wg := &sync.WaitGroup{}
 
+			// message the running MessengerServer with messages where it's the destination.
 			for i := 0; i < tt.numSenders; i++ {
 				wg.Add(1)
-				go messageTargetNode(tt.numSinkMessagesPerSender, tt.payloadAmount,
-					s.serverAddress, s.workChan, wg)
+				go func() {
+					for i := 0; i < tt.numSinkMessagesPerSender; i++ {
+						s.AcceptMessage(context.Background(), &messaging.PathMessage{
+							Payload: tt.payloadAmount,
+							Destination: &messaging.Node{
+								Id: s.serverAddress,
+							},
+							Path: []*messaging.Node{},
+						})
+					}
+
+					wg.Done()
+				}()
 			}
 
 			for i := 0; i < tt.numSenders; i++ {
 				wg.Add(1)
-				go messageRelayNode(s.serverAddress, "127.0.0.1:9999", mockOtherNode, s.workChan, tt.numRelayMessagesPerSender, tt.payloadAmount, wg)
+				go func() {
+					for i := 0; i < tt.numRelayMessagesPerSender; i++ {
+						mockOtherNode.EXPECT().AcceptMessage(gomock.Any(), &messaging.PathMessage{
+							Payload: tt.payloadAmount,
+							Destination: &messaging.Node{
+								Id: "127.0.0.1:9999",
+							},
+							Path: []*messaging.Node{{Id: s.serverAddress}},
+						}).Return(&messaging.PathResponse{}, nil)
+
+						s.AcceptMessage(context.Background(), &messaging.PathMessage{
+							Payload: tt.payloadAmount,
+							Destination: &messaging.Node{
+								Id: "127.0.0.1:9999",
+							},
+							Path: []*messaging.Node{},
+						})
+					}
+
+					wg.Done()
+				}()
 			}
 
 			// when running, nodes will finish their task and inform the registration node.
@@ -381,44 +409,6 @@ func TestMessengerServer_processMessages(t *testing.T) {
 	}
 }
 
-func messageTargetNode(numMessages int, payloadAmount int32, targetSink string, targetChan chan *messaging.PathMessage, wg *sync.WaitGroup) {
-	for i := 0; i < numMessages; i++ {
-		targetChan <- &messaging.PathMessage{
-			Payload: payloadAmount,
-			Destination: &messaging.Node{
-				Id: targetSink,
-			},
-			Path: []*messaging.Node{},
-		}
-	}
-	wg.Done()
-}
-
-func messageRelayNode(senderID string, destinationAddress string, targetRelayNode *messaging.MockPathMessengerClient,
-	senderChan chan *messaging.PathMessage,
-	numMessages int, payloadAmount int32, wg *sync.WaitGroup) {
-
-	for i := 0; i < numMessages; i++ {
-		targetRelayNode.EXPECT().AcceptMessage(gomock.Any(), &messaging.PathMessage{
-			Payload: payloadAmount,
-			Destination: &messaging.Node{
-				Id: destinationAddress,
-			},
-			Path: []*messaging.Node{{Id: senderID}},
-		}).Return(&messaging.PathResponse{}, nil)
-
-		senderChan <- &messaging.PathMessage{
-			Payload: payloadAmount,
-			Destination: &messaging.Node{
-				Id: destinationAddress,
-			},
-			Path: []*messaging.Node{},
-		}
-	}
-
-	wg.Done()
-}
-
 func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
 	tests := []struct {
 		name                      string
@@ -452,9 +442,7 @@ func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
 				nodePathDict:  tt.otherNodes,
 			}
 
-			s.setWorkValues(tt.numWorkers)
 			go s.trackReceivedData()
-			go s.processMessages()
 
 			testStart := time.Now()
 
@@ -464,13 +452,13 @@ func TestMessengerServer_processMessagesUnknownPath(t *testing.T) {
 				wg.Add(1)
 				go func() {
 					for i := 0; i < tt.numRelayMessagesPerSender; i++ {
-						s.workChan <- &messaging.PathMessage{
+						s.AcceptMessage(context.Background(), &messaging.PathMessage{
 							Payload: tt.payloadAmount,
 							Destination: &messaging.Node{
 								Id: "127.0.0.1:11111111",
 							},
 							Path: []*messaging.Node{},
-						}
+						})
 					}
 
 					wg.Done()
