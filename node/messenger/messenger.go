@@ -292,13 +292,16 @@ func (s *MessengerServer) AcceptMessage(ctx context.Context, mp *messaging.PathM
 		MessageType: RELAYED,
 	}
 
-	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
-	_, err := s.nodeConns[nextNode].AcceptMessage(ctx, mp)
-	if err != nil {
-		s.logger.Err(err).Msgf("%v", mp)
-	}
+	go func() {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(time.Millisecond*5000))
+		_, err := s.nodeConns[nextNode].AcceptMessage(ctx, mp)
+		if err != nil {
+			s.logger.Err(err).Msgf("%v", mp)
+		}
 
-	cancel()
+		cancel()
+	}()
+
 	return &messaging.PathResponse{}, nil
 }
 
